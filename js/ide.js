@@ -28,6 +28,14 @@ const INITIAL_WAIT_TIME_MS = 0;
 const WAIT_TIME_FUNCTION = i => 100;
 const MAX_PROBE_REQUESTS = 600;
 
+// Project Horizon Restriction: Only allow selected languages in dropdown
+const ALLOWED_LANGUAGE_PREFIXES = ["java", "python", "c++", "javascript"];
+
+function isAllowedLanguage(language) {
+    const name = (language.name || "").toLowerCase().trim();
+    return ALLOWED_LANGUAGE_PREFIXES.some(prefix => name.startsWith(prefix));
+}
+
 var fontSize = 13;
 
 var layout;
@@ -362,6 +370,10 @@ async function loadLangauges() {
             success: function (data) {
                 for (let i = 0; i < data.length; i++) {
                     let language = data[i];
+
+                    // Skip languages not allowed for Programming I
+                    if (!isAllowedLanguage(language)) continue;
+
                     let option = new Option(language.name, language.id);
                     option.setAttribute("flavor", CE);
                     option.setAttribute("langauge_mode", getEditorLanguageMode(language.name));
@@ -382,6 +394,10 @@ async function loadLangauges() {
                 success: function (data) {
                     for (let i = 0; i < data.length; i++) {
                         let language = data[i];
+
+                        // Skip languages not allowed for Programming I
+                        if (!isAllowedLanguage(language)) continue;
+
                         let option = new Option(language.name, language.id);
                         option.setAttribute("flavor", EXTRA_CE);
                         option.setAttribute("langauge_mode", getEditorLanguageMode(language.name));
