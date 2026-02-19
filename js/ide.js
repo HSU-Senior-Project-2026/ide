@@ -509,9 +509,28 @@ document.addEventListener("DOMContentLoaded", async function () {
     $selectLanguage.change(function (event, data) {
         let skipSetDefaultSourceCodeName = (data && data.skipSetDefaultSourceCodeName) || !!gPuterFile;
         loadSelectedLanguage(skipSetDefaultSourceCodeName);
+
+         // ---- Persist selected language ----
+        localStorage.setItem(
+            "judge0.draft.language_id",
+            String(getSelectedLanguageId())
+        );
+
+        localStorage.setItem(
+            "judge0.draft.language_flavor",
+            String(getSelectedLanguageFlavor())
+        );
     });
 
     await loadLangauges();
+    // ---- Restore saved language selection ----
+    const savedLangId = localStorage.getItem("judge0.draft.language_id");
+    const savedFlavor = localStorage.getItem("judge0.draft.language_flavor");
+
+    if (savedLangId && savedFlavor) {
+        selectLanguageByFlavorAndId(Number(savedLangId), savedFlavor);
+    }
+
 
     $compilerOptions = $("#compiler-options");
     $commandLineArguments = $("#command-line-arguments");
@@ -589,6 +608,50 @@ document.addEventListener("DOMContentLoaded", async function () {
                     enabled: true
                 }
             });
+
+            // ----- Draft autosave/restore (robust against init overwrites) -----
+            const DRAFT_KEY = "judge0.draft.source_code";
+
+            let isInitializingEditor = true;   // block autosave while the IDE sets defaults
+            let isRestoringDraft = false;      // block autosave during restore
+
+            // Autosave (but NOT during initialization/restore)
+            sourceEditor.onDidChangeModelContent(() => {
+            if (isInitializingEditor || isRestoringDraft) return;
+
+            try {
+                localStorage.setItem(DRAFT_KEY, sourceEditor.getValue());
+            } catch (e) {
+                console.error("Draft save failed:", e);
+            }
+            });
+
+            // Restore AFTER the IDE finishes setting its default content
+            try {
+            const savedDraft = localStorage.getItem(DRAFT_KEY);
+
+            // Let the rest of the IDE do its normal setup first
+            setTimeout(() => {
+                isInitializingEditor = false;
+
+                if (savedDraft && savedDraft.length > 0) {
+                const shouldRestore = confirm("Restore unsaved work from last session?");
+                if (shouldRestore) {
+                    isRestoringDraft = true;
+                    sourceEditor.setValue(savedDraft);
+                    isRestoringDraft = false;
+                } else {
+                    localStorage.removeItem(DRAFT_KEY);
+                }
+                }
+            }, 250); // small delay so default snippet/language init finishes
+            } catch (e) {
+            console.error("Draft restore failed:", e);
+            isInitializingEditor = false;
+            }
+
+            // ----- End of autosave/restore draft feature -----
+
 
             sourceEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
 
