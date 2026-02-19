@@ -1,4 +1,4 @@
-import { usePuter } from "./puter.js";
+// import { usePuter } from "./puter.js";
 import configuration from "./configuration.js";
 
 const API_KEY = "";
@@ -325,27 +325,27 @@ function saveFile(content, filename) {
     URL.revokeObjectURL(link.href);
 }
 
-async function openAction() {
-    if (usePuter()) {
-        gPuterFile = await puter.ui.showOpenFilePicker();
-        openFile(await (await gPuterFile.read()).text(), gPuterFile.name);
-    } else {
-        document.getElementById("open-file-input").click();
-    }
-}
+// async function openAction() {
+//     if (usePuter()) {
+//         gPuterFile = await puter.ui.showOpenFilePicker();
+//         openFile(await (await gPuterFile.read()).text(), gPuterFile.name);
+//     } else {
+//         document.getElementById("open-file-input").click();
+//     }
+// }
 
-async function saveAction() {
-    if (usePuter()) {
-        if (gPuterFile) {
-            gPuterFile.write(sourceEditor.getValue());
-        } else {
-            gPuterFile = await puter.ui.showSaveFilePicker(sourceEditor.getValue(), getSourceCodeName());
-            setSourceCodeName(gPuterFile.name);
-        }
-    } else {
-        saveFile(sourceEditor.getValue(), getSourceCodeName());
-    }
-}
+// async function saveAction() {
+//     if (usePuter()) {
+//         if (gPuterFile) {
+//             gPuterFile.write(sourceEditor.getValue());
+//         } else {
+//             gPuterFile = await puter.ui.showSaveFilePicker(sourceEditor.getValue(), getSourceCodeName());
+//             setSourceCodeName(gPuterFile.name);
+//         }
+//     } else {
+//         saveFile(sourceEditor.getValue(), getSourceCodeName());
+//     }
+// }
 
 function setFontSizeForAllEditors(fontSize) {
     sourceEditor.updateOptions({ fontSize: fontSize });
@@ -487,7 +487,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     refreshSiteContentHeight();
 
-    console.log("Hey, Judge0 IDE is open-sourced: https://github.com/judge0/ide. Have fun!");
+    // console.log("Hey, Judge0 IDE is open-sourced: https://github.com/judge0/ide. Have fun!");
 
     $selectLanguage = $("#select-language");
     $selectLanguage.change(function (event, data) {
@@ -568,7 +568,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 automaticLayout: true,
                 scrollBeyondLastLine: true,
                 readOnly: state.readOnly,
-                language: "cpp",
+                language: "java",
                 minimap: {
                     enabled: true
                 }
@@ -596,29 +596,10 @@ document.addEventListener("DOMContentLoaded", async function () {
                         endColumn: model.getLineMaxColumn(model.getLineCount())
                     });
 
-                    const aiResponse = await puter.ai.chat([{
-                        role: "user",
-                        content: `You are a code completion assistant. Given the following context, generate the most likely code completion.
+                    // ${textBeforeCursor}
 
-                    ### Code Before Cursor:
-                    ${textBeforeCursor}
+                    // ${textAfterCursor}
 
-                    ### Code After Cursor:
-                    ${textAfterCursor}
-
-                    ### Instructions:
-                    - Predict the next logical code segment.
-                    - Ensure the suggestion is syntactically and contextually correct.
-                    - Keep the completion concise and relevant.
-                    - Do not repeat existing code.
-                    - Provide only the missing code.
-                    - **Respond with only the code, without markdown formatting.**
-                    - **Do not include triple backticks (\`\`\`) or additional explanations.**
-
-                    ### Completion:`.trim()
-                    }], {
-                        model: document.getElementById("judge0-chat-model-select").value,
-                    });
 
                     let aiResponseValue = aiResponse?.toString().trim() || "";
 
@@ -697,12 +678,12 @@ document.addEventListener("DOMContentLoaded", async function () {
         e.innerText = `${superKey}${e.innerText}`;
     });
 
-    if (usePuter()) {
-        puter.ui.onLaunchedWithItems(async function (items) {
-            gPuterFile = items[0];
-            openFile(await (await gPuterFile.read()).text(), gPuterFile.name);
-        });
-    }
+    // if (usePuter()) {
+    //     puter.ui.onLaunchedWithItems(async function (items) {
+    //         gPuterFile = items[0];
+    //         openFile(await (await gPuterFile.read()).text(), gPuterFile.name);
+    //     });
+    // }
 
     document.getElementById("judge0-open-file-btn").addEventListener("click", openAction);
     document.getElementById("judge0-save-btn").addEventListener("click", saveAction);
@@ -751,128 +732,6 @@ document.addEventListener("DOMContentLoaded", async function () {
     };
 });
 
-const DEFAULT_SOURCE = "\
-#include <algorithm>\n\
-#include <cstdint>\n\
-#include <iostream>\n\
-#include <limits>\n\
-#include <set>\n\
-#include <utility>\n\
-#include <vector>\n\
-\n\
-using Vertex    = std::uint16_t;\n\
-using Cost      = std::uint16_t;\n\
-using Edge      = std::pair< Vertex, Cost >;\n\
-using Graph     = std::vector< std::vector< Edge > >;\n\
-using CostTable = std::vector< std::uint64_t >;\n\
-\n\
-constexpr auto kInfiniteCost{ std::numeric_limits< CostTable::value_type >::max() };\n\
-\n\
-auto dijkstra( Vertex const start, Vertex const end, Graph const & graph, CostTable & costTable )\n\
-{\n\
-    std::fill( costTable.begin(), costTable.end(), kInfiniteCost );\n\
-    costTable[ start ] = 0;\n\
-\n\
-    std::set< std::pair< CostTable::value_type, Vertex > > minHeap;\n\
-    minHeap.emplace( 0, start );\n\
-\n\
-    while ( !minHeap.empty() )\n\
-    {\n\
-        auto const vertexCost{ minHeap.begin()->first  };\n\
-        auto const vertex    { minHeap.begin()->second };\n\
-\n\
-        minHeap.erase( minHeap.begin() );\n\
-\n\
-        if ( vertex == end )\n\
-        {\n\
-            break;\n\
-        }\n\
-\n\
-        for ( auto const & neighbourEdge : graph[ vertex ] )\n\
-        {\n\
-            auto const & neighbour{ neighbourEdge.first };\n\
-            auto const & cost{ neighbourEdge.second };\n\
-\n\
-            if ( costTable[ neighbour ] > vertexCost + cost )\n\
-            {\n\
-                minHeap.erase( { costTable[ neighbour ], neighbour } );\n\
-                costTable[ neighbour ] = vertexCost + cost;\n\
-                minHeap.emplace( costTable[ neighbour ], neighbour );\n\
-            }\n\
-        }\n\
-    }\n\
-\n\
-    return costTable[ end ];\n\
-}\n\
-\n\
-int main()\n\
-{\n\
-    constexpr std::uint16_t maxVertices{ 10000 };\n\
-\n\
-    Graph     graph    ( maxVertices );\n\
-    CostTable costTable( maxVertices );\n\
-\n\
-    std::uint16_t testCases;\n\
-    std::cin >> testCases;\n\
-\n\
-    while ( testCases-- > 0 )\n\
-    {\n\
-        for ( auto i{ 0 }; i < maxVertices; ++i )\n\
-        {\n\
-            graph[ i ].clear();\n\
-        }\n\
-\n\
-        std::uint16_t numberOfVertices;\n\
-        std::uint16_t numberOfEdges;\n\
-\n\
-        std::cin >> numberOfVertices >> numberOfEdges;\n\
-\n\
-        for ( auto i{ 0 }; i < numberOfEdges; ++i )\n\
-        {\n\
-            Vertex from;\n\
-            Vertex to;\n\
-            Cost   cost;\n\
-\n\
-            std::cin >> from >> to >> cost;\n\
-            graph[ from ].emplace_back( to, cost );\n\
-        }\n\
-\n\
-        Vertex start;\n\
-        Vertex end;\n\
-\n\
-        std::cin >> start >> end;\n\
-\n\
-        auto const result{ dijkstra( start, end, graph, costTable ) };\n\
-\n\
-        if ( result == kInfiniteCost )\n\
-        {\n\
-            std::cout << \"NO\\n\";\n\
-        }\n\
-        else\n\
-        {\n\
-            std::cout << result << '\\n';\n\
-        }\n\
-    }\n\
-\n\
-    return 0;\n\
-}\n\
-";
-
-const DEFAULT_STDIN = "\
-3\n\
-3 2\n\
-1 2 5\n\
-2 3 7\n\
-1 3\n\
-3 3\n\
-1 2 4\n\
-1 3 7\n\
-2 3 1\n\
-1 3\n\
-3 1\n\
-1 2 4\n\
-1 3\n\
-";
 
 const DEFAULT_COMPILER_OPTIONS = "";
 const DEFAULT_CMD_ARGUMENTS = "";
@@ -881,28 +740,23 @@ const DEFAULT_LANGUAGE_ID = 105; // C++ (GCC 14.1.0) (https://ce.judge0.com/lang
 function getEditorLanguageMode(languageName) {
     const DEFAULT_EDITOR_LANGUAGE_MODE = "plaintext";
     const LANGUAGE_NAME_TO_LANGUAGE_EDITOR_MODE = {
-        "Bash": "shell",
-        "C": "c",
-        "C3": "c",
-        "C#": "csharp",
-        "C++": "cpp",
-        "Clojure": "clojure",
-        "F#": "fsharp",
-        "Go": "go",
+        // "Bash": "shell",
+        // "C": "c",
+        // "C3": "c",
+        // "C#": "csharp",
+        // "C++": "cpp",
+        // "Clojure": "clojure",
+        // "F#": "fsharp",
+        // "Go": "go",
         "Java": "java",
-        "JavaScript": "javascript",
-        "Kotlin": "kotlin",
-        "Objective-C": "objective-c",
-        "Pascal": "pascal",
-        "Perl": "perl",
-        "PHP": "php",
-        "Python": "python",
-        "R": "r",
-        "Ruby": "ruby",
-        "SQL": "sql",
-        "Swift": "swift",
-        "TypeScript": "typescript",
-        "Visual Basic": "vb"
+        // "JavaScript": "javascript",
+        // "Kotlin": "kotlin",
+        // "Objective-C": "objective-c",
+        // "Pascal": "pascal",
+        // "Perl": "perl",
+        // "PHP": "php",
+        // "Python": "python",
+        // "TypeScript": "typescript",
     }
 
     for (let key in LANGUAGE_NAME_TO_LANGUAGE_EDITOR_MODE) {
@@ -914,25 +768,16 @@ function getEditorLanguageMode(languageName) {
 }
 
 const EXTENSIONS_TABLE = {
-    "asm": { "flavor": CE, "language_id": 45 }, // Assembly (NASM 2.14.02)
-    "c": { "flavor": CE, "language_id": 103 }, // C (GCC 14.1.0)
-    "cpp": { "flavor": CE, "language_id": 105 }, // C++ (GCC 14.1.0)
-    "cs": { "flavor": EXTRA_CE, "language_id": 29 }, // C# (.NET Core SDK 7.0.400)
-    "go": { "flavor": CE, "language_id": 95 }, // Go (1.18.5)
+    // "asm": { "flavor": CE, "language_id": 45 }, // Assembly (NASM 2.14.02)
+    // "c": { "flavor": CE, "language_id": 103 }, // C (GCC 14.1.0)
+    // "cpp": { "flavor": CE, "language_id": 105 }, // C++ (GCC 14.1.0)
     "java": { "flavor": CE, "language_id": 91 }, // Java (JDK 17.0.6)
-    "js": { "flavor": CE, "language_id": 102 }, // JavaScript (Node.js 22.08.0)
-    "lua": { "flavor": CE, "language_id": 64 }, // Lua (5.3.5)
-    "pas": { "flavor": CE, "language_id": 67 }, // Pascal (FPC 3.0.4)
-    "php": { "flavor": CE, "language_id": 98 }, // PHP (8.3.11)
-    "py": { "flavor": EXTRA_CE, "language_id": 25 }, // Python for ML (3.11.2)
-    "r": { "flavor": CE, "language_id": 99 }, // R (4.4.1)
-    "rb": { "flavor": CE, "language_id": 72 }, // Ruby (2.7.0)
-    "rs": { "flavor": CE, "language_id": 73 }, // Rust (1.40.0)
-    "scala": { "flavor": CE, "language_id": 81 }, // Scala (2.13.2)
-    "sh": { "flavor": CE, "language_id": 46 }, // Bash (5.0.0)
-    "swift": { "flavor": CE, "language_id": 83 }, // Swift (5.2.3)
-    "ts": { "flavor": CE, "language_id": 101 }, // TypeScript (5.6.2)
-    "txt": { "flavor": CE, "language_id": 43 }, // Plain Text
+    // "js": { "flavor": CE, "language_id": 102 }, // JavaScript (Node.js 22.08.0)
+    // "php": { "flavor": CE, "language_id": 98 }, // PHP (8.3.11)
+    // "py": { "flavor": EXTRA_CE, "language_id": 25 }, // Python for ML (3.11.2)
+    // "sh": { "flavor": CE, "language_id": 46 }, // Bash (5.0.0)
+    // "ts": { "flavor": CE, "language_id": 101 }, // TypeScript (5.6.2)
+    // "txt": { "flavor": CE, "language_id": 43 }, // Plain Text
 };
 
 function getLanguageForExtension(extension) {
