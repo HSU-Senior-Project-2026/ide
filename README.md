@@ -37,3 +37,20 @@ Thanks a lot to all [contributors](https://github.com/judge0/ide/graphs/contribu
 
 ## License
 Judge0 IDE is licensed under the [MIT License](https://github.com/judge0/ide/blob/master/LICENSE).
+
+## Local Judge0 Java Fix
+If your local Judge0 Java runs fail with errors like `Could not reserve enough space for 256000KB object heap`, apply the Java language patch script after starting your Judge0 containers.
+
+PowerShell (Windows):
+```powershell
+.\scripts\patch-judge0-java-language.ps1
+```
+
+Bash (Linux/macOS):
+```bash
+bash ./scripts/patch-judge0-java-language.sh
+```
+
+Optional arguments:
+- First arg/parameter: container name (default: `judge0-judge0-1`)
+- Second arg/parameter: language id (default: `62`)
