@@ -10,15 +10,19 @@ const AUTH_HEADERS = API_KEY ? {
 const CE = "CE";
 const EXTRA_CE = "EXTRA_CE";
 
-const AUTHENTICATED_CE_BASE_URL = "https://ce.judge0.com";
-const AUTHENTICATED_EXTRA_CE_BASE_URL = "https://extra-ce.judge0.com";
+// const AUTHENTICATED_CE_BASE_URL = "https://ce.judge0.com";
+// const AUTHENTICATED_EXTRA_CE_BASE_URL = "https://extra-ce.judge0.com";
+const AUTHENTICATED_CE_BASE_URL = "http://localhost:2358";
+const AUTHENTICATED_EXTRA_CE_BASE_URL = "http://localhost:2358";
 
 var AUTHENTICATED_BASE_URL = {};
 AUTHENTICATED_BASE_URL[CE] = AUTHENTICATED_CE_BASE_URL;
 AUTHENTICATED_BASE_URL[EXTRA_CE] = AUTHENTICATED_EXTRA_CE_BASE_URL;
 
-const UNAUTHENTICATED_CE_BASE_URL = "https://ce.judge0.com";
-const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "https://extra-ce.judge0.com";
+// const UNAUTHENTICATED_CE_BASE_URL = "https://ce.judge0.com";
+// const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "https://extra-ce.judge0.com";
+const UNAUTHENTICATED_CE_BASE_URL = "http://localhost:2358";
+const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "http://localhost:2358";
 
 var UNAUTHENTICATED_BASE_URL = {};
 UNAUTHENTICATED_BASE_URL[CE] = UNAUTHENTICATED_CE_BASE_URL;
@@ -782,4 +786,13 @@ const EXTENSIONS_TABLE = {
 
 function getLanguageForExtension(extension) {
     return EXTENSIONS_TABLE[extension] || { "flavor": CE, "language_id": 43 }; // Plain Text (https://ce.judge0.com/languages/43)
+}
+
+// new addition, might need to be removed later
+function openAction() {
+    document.getElementById("open-file-input").click();
+}
+
+function saveAction() {
+    saveFile(sourceEditor.getValue(), getSourceCodeName());
 }
