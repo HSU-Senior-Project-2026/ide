@@ -739,13 +739,13 @@ document.addEventListener("DOMContentLoaded", async function () {
 
 const DEFAULT_COMPILER_OPTIONS = "";
 const DEFAULT_CMD_ARGUMENTS = "";
-const DEFAULT_LANGUAGE_ID = 105; // C++ (GCC 14.1.0) (https://ce.judge0.com/languages/105)
+const DEFAULT_LANGUAGE_ID = 91; // Java (https://ce.judge0.com/languages/105)
 
 function getEditorLanguageMode(languageName) {
     const DEFAULT_EDITOR_LANGUAGE_MODE = "plaintext";
     const LANGUAGE_NAME_TO_LANGUAGE_EDITOR_MODE = {
         // "Bash": "shell",
-        // "C": "c",
+        "C": "c",
         // "C3": "c",
         // "C#": "csharp",
         // "C++": "cpp",
@@ -759,7 +759,7 @@ function getEditorLanguageMode(languageName) {
         // "Pascal": "pascal",
         // "Perl": "perl",
         // "PHP": "php",
-        // "Python": "python",
+        "Python": "python",
         // "TypeScript": "typescript",
     }
 
@@ -773,12 +773,12 @@ function getEditorLanguageMode(languageName) {
 
 const EXTENSIONS_TABLE = {
     // "asm": { "flavor": CE, "language_id": 45 }, // Assembly (NASM 2.14.02)
-    // "c": { "flavor": CE, "language_id": 103 }, // C (GCC 14.1.0)
+    "c": { "flavor": CE, "language_id": 103 }, // C (GCC 14.1.0)
     // "cpp": { "flavor": CE, "language_id": 105 }, // C++ (GCC 14.1.0)
     "java": { "flavor": CE, "language_id": 91 }, // Java (JDK 17.0.6)
     // "js": { "flavor": CE, "language_id": 102 }, // JavaScript (Node.js 22.08.0)
     // "php": { "flavor": CE, "language_id": 98 }, // PHP (8.3.11)
-    // "py": { "flavor": EXTRA_CE, "language_id": 25 }, // Python for ML (3.11.2)
+    "py": { "flavor": EXTRA_CE, "language_id": 25 }, // Python for ML (3.11.2)
     // "sh": { "flavor": CE, "language_id": 46 }, // Bash (5.0.0)
     // "ts": { "flavor": CE, "language_id": 101 }, // TypeScript (5.6.2)
     // "txt": { "flavor": CE, "language_id": 43 }, // Plain Text
