@@ -101,6 +101,10 @@
             <span class="text">File</span>
             <i class="dropdown icon"></i>
             <div class="menu judge0-file-menu">
+                <div id="judge0-new-file-btn" class="item">
+                    <span class="description">+N</span>
+                    <span class="text"><i class="plus icon"></i>New File</span>
+                </div>
                 <div id="judge0-open-file-btn" class="item">
                     <span class="description">+O</span>
                     <span class="text"><i class="file icon"></i>Open File...</span>
@@ -112,17 +116,7 @@
                 </div>
             </div>
         </div>
-        <div class="ui simple dropdown item judge0-showHelpMenu">
-            <span class="text">Help</span>
-            <i class="dropdown icon"></i>
-            <div class="menu judge0-file-menu">
-                <a href="https://github.com/judge0/ide" class="link text item" target="_blank"><i class="external square alternate icon"></i>GitHub Repository</a>
-                <a href="/embed" class="link text item" target="_blank"><i class="external square alternate icon"></i>Embed Guide</a>
-                <a href="https://platform.sulu.sh/apis/judge0" class="link text item" target="_blank"><i class="external square alternate icon"></i>HTTP API Documentation</a>
-                <a href="PRIVACY.md" class="link text item" target="_blank"><i class="external square alternate icon"></i>Privacy Policy</a>
-                <a href="TERMS.md" class="link text item" target="_blank"><i class="external square alternate icon"></i>Terms of Service</a>
-            </div>
-        </div>
+        <!-- Help menu removed -->
         <div class="item judge0-showSelectLanguage">
             <select id="select-language" class="ui search selection dropdown"></select>
         </div>
@@ -186,6 +180,24 @@
 
     <div id="judge0-site-content"></div>
 
+    <!--New File Modal-->
+    <div id="judge0-new-file-modal" class="ui small modal">
+        <div class="header">New File</div>
+        <div class="content">
+            <form id="judge0-new-file-form" class="ui form">
+                <div class="field">
+                    <label>Filename</label>
+                    <input type="text" id="new-file-name" placeholder="e.g. Main.java, hello.py, program.c" autocomplete="off">
+                </div>
+            </form>
+        </div>
+        <div class="actions">
+            <button id="judge0-new-file-cancel-btn" type="button" class="ui secondary button">Cancel</button>
+            <button id="judge0-new-file-create-btn" type="button" class="ui primary button">Create</button>
+        </div>
+    </div>
+    <!--END New File Modal-->
+
     <!--Sign in Modal for CSCI-->
     <div id="judge0-csci-sign-in-modal" class="ui modal" autocomplete="off">
         <div class="header">
@@ -201,8 +213,8 @@
                     <label>Password</label>
                     <input type="password" id="modal_password" name="modal_password" placeholder="Password" required  autocapitalize="off" autocorrect="off" spellcheck="false">
                 </div>
-                <button id="judge0-csci-modal-sign-in-btn" type="submit" class="ui primary button">Sign In</button>
-                <button id="judge0-csci-modal-sign-in-cancel-btn" type="submit" class="ui secondary button">Cancel</button>
+                <button id="judge0-csci-modal-sign-in-btn" type="button" class="ui primary button">Sign In</button>
+                <button id="judge0-csci-modal-sign-in-cancel-btn" type="button" class="ui secondary button">Cancel</button>
             </form>
         </div>
 
