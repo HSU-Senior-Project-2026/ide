@@ -64,6 +64,60 @@ var timeStart;
 var sqliteAdditionalFiles;
 var languages = {};
 
+// Error line highlighting decorations
+var errorDecorations = [];
+
+function clearErrorHighlights() {
+    if (sourceEditor && errorDecorations.length) {
+        errorDecorations = sourceEditor.deltaDecorations(errorDecorations, []);
+    }
+}
+
+function highlightErrorLines(compileOutput) {
+    clearErrorHighlights();
+    if (!sourceEditor || !compileOutput) return;
+
+    var lineNumbers = [];
+    // Java: Main.java:5: error: ...
+    // C/GCC: main.c:12:5: error: ...  or  main.c:12:5: warning: ...
+    // Python: File "main.py", line 3
+    var patterns = [
+        /\.(?:java|c|cpp|h):(\d+)/g,              // Java / C / C++
+        /File\s+"[^"]+",\s+line\s+(\d+)/g,        // Python
+        /^(\d+)\s*\|/gm,                           // GCC caret-style output
+        /error.*?:(\d+):/g                         // generic fallback
+    ];
+
+    patterns.forEach(function (regex) {
+        var match;
+        while ((match = regex.exec(compileOutput)) !== null) {
+            var lineNum = parseInt(match[1]);
+            if (lineNum > 0 && lineNumbers.indexOf(lineNum) === -1) {
+                lineNumbers.push(lineNum);
+            }
+        }
+    });
+
+    if (lineNumbers.length === 0) return;
+
+    var decorations = lineNumbers.map(function (line) {
+        return {
+            range: new monaco.Range(line, 1, line, 1),
+            options: {
+                isWholeLine: true,
+                className: "judge0-error-line",
+                glyphMarginClassName: "judge0-error-glyph",
+                overviewRuler: {
+                    color: "#ff0000",
+                    position: monaco.editor.OverviewRulerLane.Full
+                }
+            }
+        };
+    });
+
+    errorDecorations = sourceEditor.deltaDecorations([], decorations);
+}
+
 var layoutConfig = {
     settings: {
         showPopoutIcon: false,
@@ -190,11 +244,11 @@ function handleResult(data) {
 
     $statusLine.html(`${status.description}, ${time}, ${memory} (TAT: ${tat}ms)`);
 
-    /*const output = [compileOutput, stdout].filter(x => x).join("\n").trimEnd();
-    stdoutEditor.setValue(output);*/
-    
     const runtimeOutput = [stdout, stderr].filter(x => x).join("\n").trimEnd();
     const compileText = (compileOutput || "").trimEnd();
+
+    // Highlight error lines from compiler output or runtime errors
+    highlightErrorLines(compileOutput || stderr);
 
     // Compile tab: show compiler output or a friendly success message
     if (compileOutEditor) {
@@ -286,6 +340,8 @@ function compileOnly() {
         redirect_stderr_to_stdout: false
     };
 
+    clearErrorHighlights();
+
     $.ajax({
         url: `${AUTHENTICATED_BASE_URL[flavor]}/submissions?base64_encoded=true&wait=true`,
         type: "POST",
@@ -305,6 +361,7 @@ function compileOnly() {
                 runOutEditor.setValue("");
             }
 
+            highlightErrorLines(compileOutput);
             $statusLine.html(data.status.description);
             setCompileButtonLoading(false);
         },
@@ -318,6 +375,7 @@ function compileOnly() {
 
 
 function run() {
+    clearErrorHighlights();
     if (sourceEditor.getValue().trim() === "") {
         showError("Error", "Source code can't be empty!");
 	return;
@@ -793,6 +851,35 @@ document.addEventListener("DOMContentLoaded", async function () {
     $statusLine = $("#judge0-status-line");
 
     $(document).on("keydown", "body", function (e) {
+        // Shift+Alt shortcuts (avoid browser conflicts)
+        if (e.shiftKey && e.altKey) {
+            switch (e.key.toLowerCase()) {
+                case "n":
+                    e.preventDefault();
+                    document.getElementById("judge0-new-file-btn").click();
+                    return;
+                case "o":
+                    e.preventDefault();
+                    openAction();
+                    return;
+                case "d":
+                    e.preventDefault();
+                    document.getElementById("judge0-download-btn").click();
+                    return;
+            }
+        }
+
+        // ? key (no modifier needed) — show shortcuts modal
+        if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            // Don't trigger if typing in an input field
+            var tag = document.activeElement.tagName;
+            if (tag !== "INPUT" && tag !== "TEXTAREA") {
+                e.preventDefault();
+                $("#judge0-shortcuts-modal").modal("show");
+                return;
+            }
+        }
+
         if (e.metaKey || e.ctrlKey) {
             switch (e.key) {
                 case "Enter":
@@ -802,18 +889,6 @@ document.addEventListener("DOMContentLoaded", async function () {
                 case "s":
                     e.preventDefault();
                     saveAction();
-                    break;
-                case "o":
-                    e.preventDefault();
-                    openAction();
-                    break;
-                case "n":
-                    e.preventDefault();
-                    document.getElementById("judge0-new-file-btn").click();
-                    break;
-                case "d":
-                    e.preventDefault();
-                    document.getElementById("judge0-download-btn").click();
                     break;
                 case "+":
                 case "=":
@@ -869,6 +944,9 @@ document.addEventListener("DOMContentLoaded", async function () {
                 autoClosingBrackets: "always",
                 autoClosingQuotes: "always",
                 autoSurround: "languageDefined",
+
+                // Enable glyph margin for error indicators
+                glyphMargin: true,
 
                 // Disable autocomplete/suggestions
                 quickSuggestions: false,
@@ -1079,8 +1157,9 @@ document.addEventListener("DOMContentLoaded", async function () {
         btn.attr("data-content", `${superKey}${btn.attr("data-content")}`);
     });
 
-    document.querySelectorAll(".description").forEach(e => {
-        e.innerText = `${superKey}${e.innerText}`;
+    // Shortcuts button
+    document.getElementById("shortcuts-btn").addEventListener("click", function () {
+        $("#judge0-shortcuts-modal").modal({ closable: true }).modal("show");
     });
 
     if (usePuter()) {

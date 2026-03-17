@@ -102,20 +102,20 @@
             <i class="dropdown icon"></i>
             <div class="menu judge0-file-menu">
                 <div id="judge0-new-file-btn" class="item">
-                    <span class="description">+N</span>
+                    <span class="description">Shift+Alt+N</span>
                     <span class="text"><i class="plus icon"></i>New File</span>
                 </div>
                 <div id="judge0-open-file-btn" class="item">
-                    <span class="description">+O</span>
+                    <span class="description">Shift+Alt+O</span>
                     <span class="text"><i class="file icon"></i>Open File...</span>
                     <input type="file" id="open-file-input" style="display: none;">
                 </div>
                 <div id="judge0-save-btn" class="item">
-                    <span class="description">+S</span>
+                    <span class="description">Ctrl/⌘+S</span>
                     <span class="text"><i class="save icon"></i>Save</span>
                 </div>
                 <div id="judge0-download-btn" class="item">
-                    <span class="description">+D</span>
+                    <span class="description">Shift+Alt+D</span>
                     <span class="text"><i class="download icon"></i>Download</span>
                 </div>
             </div>
@@ -159,6 +159,11 @@
             <div class="ui compact buttons">
                 <button id="word-wrap-btn" class="ui button active" title="Toggle word wrap">
                     <i class="align left icon" style="margin:0"></i> Wrap
+                </button>
+            </div>
+            <div class="ui compact buttons">
+                <button id="shortcuts-btn" class="ui icon button" title="Keyboard shortcuts (?)">
+                    <i class="keyboard icon" style="margin:0"></i>
                 </button>
             </div>
         </div>
@@ -212,6 +217,59 @@
         </div>
     </div>
     <!--END New File Modal-->
+
+    <!--Keyboard Shortcuts Modal-->
+    <div id="judge0-shortcuts-modal" class="ui small modal">
+        <div class="header"><i class="keyboard icon"></i> Keyboard Shortcuts</div>
+        <div class="content">
+            <div class="shortcut-grid">
+                <div class="shortcut-row">
+                    <span>Run Code</span>
+                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>Enter</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span>Save</span>
+                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>S</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span>New File</span>
+                    <span class="shortcut-keys"><kbd>Shift</kbd><kbd>Alt</kbd><kbd>N</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span>Open File</span>
+                    <span class="shortcut-keys"><kbd>Shift</kbd><kbd>Alt</kbd><kbd>O</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span>Download File</span>
+                    <span class="shortcut-keys"><kbd>Shift</kbd><kbd>Alt</kbd><kbd>D</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span>Increase Font</span>
+                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>+</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span>Decrease Font</span>
+                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>-</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span>Reset Font</span>
+                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>0</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span>Focus Editor</span>
+                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>`</kbd></span>
+                </div>
+                <div class="shortcut-row">
+                    <span>Show Shortcuts</span>
+                    <span class="shortcut-keys"><kbd>?</kbd></span>
+                </div>
+            </div>
+        </div>
+        <div class="actions">
+            <div class="ui cancel secondary button">Close</div>
+        </div>
+    </div>
+    <!--END Keyboard Shortcuts Modal-->
 
     <!--Sign in Modal for CSCI-->
     <div id="judge0-csci-sign-in-modal" class="ui modal" autocomplete="off">
