@@ -270,6 +270,11 @@ function compileOnly() {
     $statusLine.html("Compiling...");
     setCompileButtonLoading(true);
 
+    const compileTab = layout.root.getItemsById("compileOut")[0];
+    if (compileTab) {
+        compileTab.parent.header.parent.setActiveContentItem(compileTab);
+    }
+
     let sourceValue = encode(sourceEditor.getValue());
     let languageId = getSelectedLanguageId();
     let flavor = getSelectedLanguageFlavor();
@@ -317,13 +322,17 @@ function run() {
         showError("Error", "Source code can't be empty!");
 	return;
     }
-    if (compiledCode !== sourceEditor.getValue().trim()){
-    	showError("Error", "Code has changed, must compile code first!");
-	return;
-    }
-    if (!isCompileButtonClicked){	//Checks to see if compile button is clicked		
-    	showError("Error", "Must compile code first");
-	return;
+    let languageId = getSelectedLanguageId();
+    // Only require compile step for compiled languages
+    if (!INTERPRETED_LANGUAGE_IDS.includes(languageId)) {
+        if (compiledCode !== sourceEditor.getValue().trim()){
+            showError("Error", "Code has changed, must compile code first!");
+            return;
+        }
+        if (!isCompileButtonClicked){	//Checks to see if compile button is clicked
+            showError("Error", "Must compile code first");
+            return;
+        }
     }
     $runBtn.addClass("loading");
     isCompileButtonClicked = false; 	//Resets compile button boolean for next run attempt
@@ -343,7 +352,7 @@ function run() {
 
     let sourceValue = encode(sourceEditor.getValue());
     let stdinValue = encode(stdinEditor.getValue());
-    let languageId = getSelectedLanguageId();
+    languageId = getSelectedLanguageId();
     let compilerOptions = $compilerOptions.val();
     let commandLineArguments = $commandLineArguments.val();
 
@@ -543,6 +552,10 @@ function setFontSizeForAllEditors(fontSize) {
 }
 
 async function loadLangauges() {
+    // Only allow Java (CE, 91), C (CE, 103), and Python (EXTRA_CE, 25)
+    var ALLOWED_CE_LANGUAGES = [91, 103];        // Java, C
+    var ALLOWED_EXTRA_CE_LANGUAGES = [25];        // Python
+
     return new Promise((resolve, reject) => {
         let options = [];
 
@@ -551,13 +564,17 @@ async function loadLangauges() {
             success: function (data) {
                 for (let i = 0; i < data.length; i++) {
                     let language = data[i];
+                    // Only add allowed CE languages
+                    if (!ALLOWED_CE_LANGUAGES.includes(language.id)) {
+                        continue;
+                    }
                     let option = new Option(language.name, language.id);
                     option.setAttribute("flavor", CE);
                     option.setAttribute("langauge_mode", getEditorLanguageMode(language.name));
 
-                    if (language.id !== 89) {
+                    //if (language.id !== 89) {
                         options.push(option);
-                    }
+                    //}
 
                     if (language.id === DEFAULT_LANGUAGE_ID) {
                         option.selected = true;
@@ -571,13 +588,17 @@ async function loadLangauges() {
                 success: function (data) {
                     for (let i = 0; i < data.length; i++) {
                         let language = data[i];
+                        // Only add allowed Extra CE languages
+                        if (!ALLOWED_EXTRA_CE_LANGUAGES.includes(language.id)) {
+                            continue;
+                        }
                         let option = new Option(language.name, language.id);
                         option.setAttribute("flavor", EXTRA_CE);
                         option.setAttribute("langauge_mode", getEditorLanguageMode(language.name));
 
-                        if (options.findIndex((t) => (t.text === option.text)) === -1 && language.id !== 89) {
+                        //if (options.findIndex((t) => (t.text === option.text)) === -1 && language.id !== 89) {
                             options.push(option);
-                        }
+                        //}
                     }
                 },
                 error: reject
@@ -591,6 +612,18 @@ async function loadLangauges() {
     });
 };
 
+// Languages that are interpreted and do not need a separate compile step
+const INTERPRETED_LANGUAGE_IDS = [25]; // Python
+
+function updateCompileButtonVisibility() {
+    let languageId = getSelectedLanguageId();
+    if (INTERPRETED_LANGUAGE_IDS.includes(languageId)) {
+        $compileBtn.hide();
+    } else {
+        $compileBtn.show();
+    }
+}
+
 async function loadSelectedLanguage(skipSetDefaultSourceCodeName = false) {
     if (!sourceEditor) {
         console.warn("Editor not initialized yet");
@@ -600,6 +633,7 @@ async function loadSelectedLanguage(skipSetDefaultSourceCodeName = false) {
     if (!skipSetDefaultSourceCodeName) {
         setSourceCodeName((await getSelectedLanguage()).source_file);
     }
+    updateCompileButtonVisibility();
 }
 
 function selectLanguageByFlavorAndId(languageId, flavor) {
@@ -775,17 +809,17 @@ document.addEventListener("DOMContentLoaded", async function () {
                     enabled: true
                 },
 
-                // Disable auto-indent
-                autoIndent: "none",
-                formatOnType: false,
-                formatOnPaste: false,
+                // Auto-indent
+                autoIndent: "full",
+                formatOnType: true,
+                formatOnPaste: true,
 
-                 //Disable automatic bracket/quote closing
-                autoClosingBrackets: "never",
-                autoClosingQuotes: "never",
-                autoSurround: "never",
+                // Auto-closing brackets and quotes
+                autoClosingBrackets: "always",
+                autoClosingQuotes: "always",
+                autoSurround: "languageDefined",
 
-                // Disable autocomplete
+                // Disable autocomplete/suggestions
                 quickSuggestions: false,
                 suggestOnTriggerCharacters: false,
                 parameterHints: { enabled: false },
@@ -888,7 +922,17 @@ document.addEventListener("DOMContentLoaded", async function () {
         });
 
         layout.registerComponent("stdin", function (container, state) {
-            stdinEditor = monaco.editor.create(container.getElement()[0], {
+            var el = container.getElement()[0];
+
+            // Add placeholder overlay for stdin
+            var placeholder = document.createElement("div");
+            placeholder.className = "stdin-placeholder";
+            placeholder.textContent = "Enter input for your program here (e.g. values read by stdin)";
+            placeholder.style.cssText = "position:absolute;top:0;left:60px;color:#888;font-size:13px;pointer-events:none;z-index:1;padding:2px 0;font-family:monospace;";
+            el.style.position = "relative";
+            el.appendChild(placeholder);
+
+            stdinEditor = monaco.editor.create(el, {
                 automaticLayout: true,
                 scrollBeyondLastLine: false,
                 readOnly: state.readOnly,
@@ -897,6 +941,13 @@ document.addEventListener("DOMContentLoaded", async function () {
                     enabled: false
                 }
             });
+
+            // Show/hide placeholder based on content
+            function togglePlaceholder() {
+                placeholder.style.display = stdinEditor.getValue() ? "none" : "block";
+            }
+            stdinEditor.onDidChangeModelContent(togglePlaceholder);
+            togglePlaceholder();
         });
 
         layout.registerComponent("stdout", function (container, state) {
@@ -1013,132 +1064,13 @@ document.addEventListener("DOMContentLoaded", async function () {
     };
 });
 
-const DEFAULT_SOURCE = "\
-#include <algorithm>\n\
-#include <cstdint>\n\
-#include <iostream>\n\
-#include <limits>\n\
-#include <set>\n\
-#include <utility>\n\
-#include <vector>\n\
-\n\
-using Vertex    = std::uint16_t;\n\
-using Cost      = std::uint16_t;\n\
-using Edge      = std::pair< Vertex, Cost >;\n\
-using Graph     = std::vector< std::vector< Edge > >;\n\
-using CostTable = std::vector< std::uint64_t >;\n\
-\n\
-constexpr auto kInfiniteCost{ std::numeric_limits< CostTable::value_type >::max() };\n\
-\n\
-auto dijkstra( Vertex const start, Vertex const end, Graph const & graph, CostTable & costTable )\n\
-{\n\
-    std::fill( costTable.begin(), costTable.end(), kInfiniteCost );\n\
-    costTable[ start ] = 0;\n\
-\n\
-    std::set< std::pair< CostTable::value_type, Vertex > > minHeap;\n\
-    minHeap.emplace( 0, start );\n\
-\n\
-    while ( !minHeap.empty() )\n\
-    {\n\
-        auto const vertexCost{ minHeap.begin()->first  };\n\
-        auto const vertex    { minHeap.begin()->second };\n\
-\n\
-        minHeap.erase( minHeap.begin() );\n\
-\n\
-        if ( vertex == end )\n\
-        {\n\
-            break;\n\
-        }\n\
-\n\
-        for ( auto const & neighbourEdge : graph[ vertex ] )\n\
-        {\n\
-            auto const & neighbour{ neighbourEdge.first };\n\
-            auto const & cost{ neighbourEdge.second };\n\
-\n\
-            if ( costTable[ neighbour ] > vertexCost + cost )\n\
-            {\n\
-                minHeap.erase( { costTable[ neighbour ], neighbour } );\n\
-                costTable[ neighbour ] = vertexCost + cost;\n\
-                minHeap.emplace( costTable[ neighbour ], neighbour );\n\
-            }\n\
-        }\n\
-    }\n\
-\n\
-    return costTable[ end ];\n\
-}\n\
-\n\
-int main()\n\
-{\n\
-    constexpr std::uint16_t maxVertices{ 10000 };\n\
-\n\
-    Graph     graph    ( maxVertices );\n\
-    CostTable costTable( maxVertices );\n\
-\n\
-    std::uint16_t testCases;\n\
-    std::cin >> testCases;\n\
-\n\
-    while ( testCases-- > 0 )\n\
-    {\n\
-        for ( auto i{ 0 }; i < maxVertices; ++i )\n\
-        {\n\
-            graph[ i ].clear();\n\
-        }\n\
-\n\
-        std::uint16_t numberOfVertices;\n\
-        std::uint16_t numberOfEdges;\n\
-\n\
-        std::cin >> numberOfVertices >> numberOfEdges;\n\
-\n\
-        for ( auto i{ 0 }; i < numberOfEdges; ++i )\n\
-        {\n\
-            Vertex from;\n\
-            Vertex to;\n\
-            Cost   cost;\n\
-\n\
-            std::cin >> from >> to >> cost;\n\
-            graph[ from ].emplace_back( to, cost );\n\
-        }\n\
-\n\
-        Vertex start;\n\
-        Vertex end;\n\
-\n\
-        std::cin >> start >> end;\n\
-\n\
-        auto const result{ dijkstra( start, end, graph, costTable ) };\n\
-\n\
-        if ( result == kInfiniteCost )\n\
-        {\n\
-            std::cout << \"NO\\n\";\n\
-        }\n\
-        else\n\
-        {\n\
-            std::cout << result << '\\n';\n\
-        }\n\
-    }\n\
-\n\
-    return 0;\n\
-}\n\
-";
+const DEFAULT_SOURCE = "";
 
-const DEFAULT_STDIN = "\
-3\n\
-3 2\n\
-1 2 5\n\
-2 3 7\n\
-1 3\n\
-3 3\n\
-1 2 4\n\
-1 3 7\n\
-2 3 1\n\
-1 3\n\
-3 1\n\
-1 2 4\n\
-1 3\n\
-";
+const DEFAULT_STDIN = "";
 
 const DEFAULT_COMPILER_OPTIONS = "";
 const DEFAULT_CMD_ARGUMENTS = "";
-const DEFAULT_LANGUAGE_ID = 105; // C++ (GCC 14.1.0) (https://ce.judge0.com/languages/105)
+const DEFAULT_LANGUAGE_ID = 91; // Java (JDK 17.0.6) (https://ce.judge0.com/languages/91)
 
 function getEditorLanguageMode(languageName) {
     const DEFAULT_EDITOR_LANGUAGE_MODE = "plaintext";
