@@ -48,6 +48,28 @@
     display: none !important;
 }
 
+/* Editor toolbar */
+.judge0-editorToolbar {
+    display: flex !important;
+    align-items: center;
+    gap: 4px;
+}
+
+.judge0-editorToolbar .ui.button {
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+}
+
+.judge0-editorToolbar #font-size-display {
+    opacity: 0.8 !important;
+    font-weight: bold;
+}
+
+#word-wrap-btn.active {
+    background-color: #2185d0 !important;
+    color: white !important;
+}
+
 @media (display-mode: standalone) {
     .judge0-standalone-hidden {
         display: none !important;

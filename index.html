@@ -114,6 +114,10 @@
                     <span class="description">+S</span>
                     <span class="text"><i class="save icon"></i>Save</span>
                 </div>
+                <div id="judge0-download-btn" class="item">
+                    <span class="description">+D</span>
+                    <span class="text"><i class="download icon"></i>Download</span>
+                </div>
             </div>
         </div>
         <!-- Help menu removed -->
@@ -141,11 +145,20 @@
                 <i class="compile-icon"></i>
                  Compile Code
             </button>
-            <button id="clear-btn" class="ui primary labeled icon button" data-content="+↵" >
+            <button id="clear-btn" class="ui labeled icon button" data-content="+↵" >
                 <i class="trash icon"></i>
-                Clear
+                Reset
             </button>
-
+        </div>
+        <div class="item judge0-editorToolbar">
+            <div class="ui tiny compact buttons">
+                <button id="font-decrease-btn" class="ui icon button" title="Decrease font size">A-</button>
+                <button id="font-size-display" class="ui disabled button" style="min-width:50px;cursor:default;">13px</button>
+                <button id="font-increase-btn" class="ui icon button" title="Increase font size">A+</button>
+            </div>
+            <div class="ui tiny compact buttons" style="margin-left:8px;">
+                <button id="word-wrap-btn" class="ui icon button active" title="Toggle word wrap">Wrap</button>
+            </div>
         </div>
         <div class="right menu">
             <div id="judge0-theme-toggle-btn" class="icon link item judge0-showThemeButton" data-content="">

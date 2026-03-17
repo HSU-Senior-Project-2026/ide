@@ -811,21 +811,32 @@ document.addEventListener("DOMContentLoaded", async function () {
                     e.preventDefault();
                     document.getElementById("judge0-new-file-btn").click();
                     break;
+                case "d":
+                    e.preventDefault();
+                    document.getElementById("judge0-download-btn").click();
+                    break;
                 case "+":
                 case "=":
                     e.preventDefault();
-                    fontSize += 1;
-                    setFontSizeForAllEditors(fontSize);
+                    if (fontSize < 32) {
+                        fontSize += 1;
+                        setFontSizeForAllEditors(fontSize);
+                        updateFontDisplay();
+                    }
                     break;
                 case "-":
                     e.preventDefault();
-                    fontSize -= 1;
-                    setFontSizeForAllEditors(fontSize);
+                    if (fontSize > 8) {
+                        fontSize -= 1;
+                        setFontSizeForAllEditors(fontSize);
+                        updateFontDisplay();
+                    }
                     break;
                 case "0":
                     e.preventDefault();
                     fontSize = 13;
                     setFontSizeForAllEditors(fontSize);
+                    updateFontDisplay();
                     break;
                 case "`":
                     e.preventDefault();
@@ -1033,6 +1044,9 @@ document.addEventListener("DOMContentLoaded", async function () {
 
         layout.on("initialised", function () {
             setDefaults();
+            applyWordWrap();
+            updateFontDisplay();
+            setFontSizeForAllEditors(fontSize);
             refreshLayoutSize();
             window.top.postMessage({ event: "initialised" }, "*");
         });
@@ -1062,6 +1076,60 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     document.getElementById("judge0-open-file-btn").addEventListener("click", openAction);
     document.getElementById("judge0-save-btn").addEventListener("click", saveAction);
+    document.getElementById("judge0-download-btn").addEventListener("click", function () {
+        if (sourceEditor) {
+            saveFile(sourceEditor.getValue(), currentFileName);
+        }
+    });
+
+    // Font size toolbar controls
+    var $fontDisplay = document.getElementById("font-size-display");
+    function updateFontDisplay() {
+        $fontDisplay.textContent = fontSize + "px";
+        try { localStorage.setItem("judge0.fontSize", fontSize); } catch (e) {}
+    }
+    // Restore saved font size
+    var savedFontSize = localStorage.getItem("judge0.fontSize");
+    if (savedFontSize) {
+        fontSize = parseInt(savedFontSize);
+        updateFontDisplay();
+    }
+
+    document.getElementById("font-decrease-btn").addEventListener("click", function () {
+        if (fontSize > 8) {
+            fontSize -= 1;
+            setFontSizeForAllEditors(fontSize);
+            updateFontDisplay();
+        }
+    });
+    document.getElementById("font-increase-btn").addEventListener("click", function () {
+        if (fontSize < 32) {
+            fontSize += 1;
+            setFontSizeForAllEditors(fontSize);
+            updateFontDisplay();
+        }
+    });
+
+    // Word wrap toggle
+    var wordWrapEnabled = localStorage.getItem("judge0.wordWrap") !== "off";
+    var $wordWrapBtn = document.getElementById("word-wrap-btn");
+    function applyWordWrap() {
+        var setting = wordWrapEnabled ? "on" : "off";
+        if (sourceEditor) sourceEditor.updateOptions({ wordWrap: setting });
+        if (stdinEditor) stdinEditor.updateOptions({ wordWrap: setting });
+        if (compileOutEditor) compileOutEditor.updateOptions({ wordWrap: setting });
+        if (runOutEditor) runOutEditor.updateOptions({ wordWrap: setting });
+        if (wordWrapEnabled) {
+            $wordWrapBtn.classList.add("active");
+        } else {
+            $wordWrapBtn.classList.remove("active");
+        }
+        try { localStorage.setItem("judge0.wordWrap", setting); } catch (e) {}
+    }
+    $wordWrapBtn.addEventListener("click", function () {
+        wordWrapEnabled = !wordWrapEnabled;
+        applyWordWrap();
+    });
 
     // New File modal handlers
     document.getElementById("judge0-new-file-btn").addEventListener("click", function () {
