@@ -52,17 +52,30 @@
 .judge0-editorToolbar {
     display: flex !important;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
 }
 
+.judge0-editorToolbar .ui.buttons,
 .judge0-editorToolbar .ui.button {
-    padding: 6px 10px !important;
-    font-size: 12px !important;
+    font-size: 13px !important;
+}
+
+.judge0-editorToolbar .ui.buttons .ui.button {
+    padding: 0.78em 1em !important;
 }
 
 .judge0-editorToolbar #font-size-display {
-    opacity: 0.8 !important;
-    font-weight: bold;
+    opacity: 0.7 !important;
+    font-weight: 600;
+    min-width: 52px;
+    text-align: center;
+    cursor: default;
+}
+
+/* Subtle separator between toolbar groups */
+.judge0-editorToolbar .ui.buttons + .ui.buttons {
+    border-left: 1px solid rgba(128, 128, 128, 0.25);
+    padding-left: 6px;
 }
 
 #word-wrap-btn.active {

@@ -982,7 +982,7 @@ document.addEventListener("DOMContentLoaded", async function () {
             var placeholder = document.createElement("div");
             placeholder.className = "stdin-placeholder";
             placeholder.textContent = "Enter input for your program here (e.g. values read by stdin)";
-            placeholder.style.cssText = "position:absolute;top:0;left:60px;color:#888;font-size:13px;pointer-events:none;z-index:1;padding:2px 0;font-family:monospace;";
+            placeholder.style.cssText = "position:absolute;top:0;color:#888;pointer-events:none;z-index:1;padding:2px 0;font-family:'JetBrains Mono',monospace;";
             el.style.position = "relative";
             el.appendChild(placeholder);
 
@@ -995,6 +995,18 @@ document.addEventListener("DOMContentLoaded", async function () {
                     enabled: false
                 }
             });
+
+            // Sync placeholder position and size with editor gutter/font
+            function updatePlaceholderPosition() {
+                var layoutInfo = stdinEditor.getLayoutInfo();
+                var opts = stdinEditor.getOptions();
+                var currentFontSize = opts.get(monaco.editor.EditorOption.fontSize);
+                placeholder.style.left = layoutInfo.contentLeft + "px";
+                placeholder.style.fontSize = currentFontSize + "px";
+                placeholder.style.lineHeight = stdinEditor.getOption(monaco.editor.EditorOption.lineHeight) + "px";
+            }
+            stdinEditor.onDidLayoutChange(updatePlaceholderPosition);
+            updatePlaceholderPosition();
 
             // Show/hide placeholder based on content
             function togglePlaceholder() {
@@ -1044,10 +1056,14 @@ document.addEventListener("DOMContentLoaded", async function () {
 
         layout.on("initialised", function () {
             setDefaults();
-            applyWordWrap();
-            updateFontDisplay();
-            setFontSizeForAllEditors(fontSize);
             refreshLayoutSize();
+            // Apply saved font size and word wrap after editors exist
+            setFontSizeForAllEditors(fontSize);
+            var wrapSetting = localStorage.getItem("judge0.wordWrap") !== "off" ? "on" : "off";
+            if (sourceEditor) sourceEditor.updateOptions({ wordWrap: wrapSetting });
+            if (stdinEditor) stdinEditor.updateOptions({ wordWrap: wrapSetting });
+            if (compileOutEditor) compileOutEditor.updateOptions({ wordWrap: wrapSetting });
+            if (runOutEditor) runOutEditor.updateOptions({ wordWrap: wrapSetting });
             window.top.postMessage({ event: "initialised" }, "*");
         });
 
@@ -1092,8 +1108,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     var savedFontSize = localStorage.getItem("judge0.fontSize");
     if (savedFontSize) {
         fontSize = parseInt(savedFontSize);
-        updateFontDisplay();
     }
+    updateFontDisplay();
 
     document.getElementById("font-decrease-btn").addEventListener("click", function () {
         if (fontSize > 8) {
