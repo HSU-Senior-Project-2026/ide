@@ -247,6 +247,16 @@ function getSelectedLanguageFlavor() {
     return $selectLanguage.find(":selected").attr("flavor");
 }
 
+function setCompileButtonLoading(loading) {
+    if (loading) {
+        $compileBtn.addClass("loading disabled");
+        $compileBtn.find(".compile-icon").removeClass().addClass("compile-icon spinner loading icon");
+    } else {
+        $compileBtn.removeClass("loading disabled");
+        $compileBtn.find(".compile-icon").removeClass().addClass("compile-icon");
+    }
+}
+
 function compileOnly() {
     compiledCode = sourceEditor.getValue().trim();
     if (sourceEditor.getValue().trim() === "") {
@@ -258,6 +268,7 @@ function compileOnly() {
     if (runOutEditor) runOutEditor.setValue("");
 
     $statusLine.html("Compiling...");
+    setCompileButtonLoading(true);
 
     let sourceValue = encode(sourceEditor.getValue());
     let languageId = getSelectedLanguageId();
@@ -290,8 +301,12 @@ function compileOnly() {
             }
 
             $statusLine.html(data.status.description);
+            setCompileButtonLoading(false);
         },
-        error: handleRunError
+        error: function (jqXHR, textStatus, errorThrown) {
+            setCompileButtonLoading(false);
+            handleRunError(jqXHR, textStatus, errorThrown);
+        }
     });
     isCompileButtonClicked = true;	//No errors for compile button, so can now make a valid run attempt
 }
