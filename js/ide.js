@@ -869,17 +869,6 @@ document.addEventListener("DOMContentLoaded", async function () {
             }
         }
 
-        // ? key (no modifier needed) — show shortcuts modal
-        if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-            // Don't trigger if typing in an input field
-            var tag = document.activeElement.tagName;
-            if (tag !== "INPUT" && tag !== "TEXTAREA") {
-                e.preventDefault();
-                $("#judge0-shortcuts-modal").modal("show");
-                return;
-            }
-        }
-
         if (e.metaKey || e.ctrlKey) {
             switch (e.key) {
                 case "Enter":
@@ -1155,11 +1144,6 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     [$runBtn].forEach(btn => {
         btn.attr("data-content", `${superKey}${btn.attr("data-content")}`);
-    });
-
-    // Shortcuts button
-    document.getElementById("shortcuts-btn").addEventListener("click", function () {
-        $("#judge0-shortcuts-modal").modal({ closable: true }).modal("show");
     });
 
     if (usePuter()) {

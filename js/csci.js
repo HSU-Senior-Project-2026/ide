@@ -34,6 +34,11 @@ async function signIn(e) {
       passwordInput.value = "";
       alert("Connected to CSCI server!");
       $('#judge0-csci-sign-in-modal').modal('hide');
+      // Update account dropdown to show signed-in state
+      var displayName = usernameInput.value.split("@")[0] || "User";
+      document.getElementById("judge0-account-label").textContent = displayName;
+      document.getElementById("judge0-csci-sign-in-btn").style.display = "none";
+      document.getElementById("judge0-csci-sign-out-btn").style.display = "";
     } else {
       alert("Login failed: " + result.error);
     }
@@ -72,6 +77,10 @@ try {
 } finally {
   if (usernameInput) usernameInput.value = "";
   if (passwordInput) passwordInput.value = "";
+  // Reset account dropdown to signed-out state
+  document.getElementById("judge0-account-label").textContent = "Account";
+  document.getElementById("judge0-csci-sign-in-btn").style.display = "";
+  document.getElementById("judge0-csci-sign-out-btn").style.display = "none";
 }
 }
 

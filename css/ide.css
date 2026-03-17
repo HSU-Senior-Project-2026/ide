@@ -22,9 +22,33 @@
     overflow-x: auto;
 }
 
-.item.judge0-showRunButton{
-    display:flex;
-    gap:10px;
+/* Compact action buttons */
+.item.judge0-showRunButton {
+    display: flex;
+    gap: 0;
+}
+
+.item.judge0-showRunButton .ui.button {
+    font-size: 13px !important;
+    padding: 0.6em 0.9em !important;
+}
+
+.item.judge0-showRunButton #clear-btn {
+    padding: 0.6em 0.7em !important;
+}
+
+/* Account dropdown */
+#judge0-account-dropdown {
+    font-size: 13px !important;
+    padding: 0.6em 0.8em !important;
+}
+
+#judge0-account-dropdown .menu {
+    min-width: 160px;
+}
+
+#judge0-account-dropdown .menu .item {
+    font-size: 13px !important;
 }
 
 .judge0-user-message {
@@ -96,38 +120,6 @@
     width: 8px !important;
     height: 8px !important;
     margin-top: 6px;
-}
-
-/* Keyboard shortcuts modal */
-#judge0-shortcuts-modal .shortcut-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 24px;
-}
-
-#judge0-shortcuts-modal .shortcut-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.15);
-}
-
-#judge0-shortcuts-modal .shortcut-keys {
-    display: flex;
-    gap: 4px;
-}
-
-#judge0-shortcuts-modal kbd {
-    display: inline-block;
-    padding: 2px 8px;
-    font-size: 12px;
-    font-family: 'JetBrains Mono', monospace;
-    background: rgba(128, 128, 128, 0.15);
-    border: 1px solid rgba(128, 128, 128, 0.3);
-    border-radius: 4px;
-    min-width: 24px;
-    text-align: center;
 }
 
 @media (display-mode: standalone) {

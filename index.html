@@ -137,18 +137,17 @@
             </div>
         </div>
         <div class="item judge0-showRunButton">
-            <button id="run-btn" class="ui primary labeled icon button" data-content="+↵">
-                <i class="play icon"></i>
-                Run Code
-            </button>
-            <button id="compile-btn" class="ui button">
-                <i class="compile-icon"></i>
-                 Compile Code
-            </button>
-            <button id="clear-btn" class="ui labeled icon button" data-content="+↵" >
-                <i class="trash icon"></i>
-                Reset
-            </button>
+            <div class="ui compact buttons">
+                <button id="run-btn" class="ui primary compact icon button" data-content="Run (Ctrl+Enter)" data-position="bottom center">
+                    <i class="play icon"></i> Run
+                </button>
+                <button id="compile-btn" class="ui compact icon button" data-content="Compile" data-position="bottom center">
+                    <i class="compile-icon"></i> Compile
+                </button>
+                <button id="clear-btn" class="ui compact icon button" data-content="Reset all" data-position="bottom center">
+                    <i class="trash icon"></i>
+                </button>
+            </div>
         </div>
         <div class="item judge0-editorToolbar">
             <div class="ui compact buttons">
@@ -161,28 +160,26 @@
                     <i class="align left icon" style="margin:0"></i> Wrap
                 </button>
             </div>
-            <div class="ui compact buttons">
-                <button id="shortcuts-btn" class="ui icon button" title="Keyboard shortcuts (?)">
-                    <i class="keyboard icon" style="margin:0"></i>
-                </button>
-            </div>
         </div>
         <div class="right menu">
             <div id="judge0-theme-toggle-btn" class="icon link item judge0-showThemeButton" data-content="">
                 <i id="judge0-theme-toggle-btn-icon" class="sun icon"></i>
             </div>
-            <!--SIGN IN AND OUT BUTTONS FOR CSCI (csci.js)-->
-            <div class ="item judge0-showCSCISignInOutButton">
-                <button id="judge0-csci-sign-in-btn" class="ui basic button">
-                    <i class="sign-in icon"></i>
-                    Sign in with CSCI
-                </button>
-                <button id="judge0-csci-sign-out-btn" class="ui basic button" data-content="Sign out">
-                    <i class="sign-out icon"></i>
-                    <span id="judge0-csci-username">Sign out</span>
-                </button>
-
-
+            <!--ACCOUNT DROPDOWN FOR CSCI (csci.js)-->
+            <div class="item judge0-showCSCISignInOutButton">
+                <div id="judge0-account-dropdown" class="ui simple dropdown button basic compact">
+                    <i class="user circle icon" style="margin:0 4px 0 0"></i>
+                    <span id="judge0-account-label">Account</span>
+                    <i class="dropdown icon"></i>
+                    <div class="menu" style="right:0;left:auto;">
+                        <div id="judge0-csci-sign-in-btn" class="item">
+                            <i class="sign-in icon"></i> Sign in with CSCI
+                        </div>
+                        <div id="judge0-csci-sign-out-btn" class="item" style="display:none;">
+                            <i class="sign-out icon"></i> Sign out
+                        </div>
+                    </div>
+                </div>
             </div>
             <!--SIGN IN AND OUT BUTTONS FOR PUTER (puter.js)-->
                <!-- <div class="item judge0-showPuterSignInOutButton">
@@ -217,59 +214,6 @@
         </div>
     </div>
     <!--END New File Modal-->
-
-    <!--Keyboard Shortcuts Modal-->
-    <div id="judge0-shortcuts-modal" class="ui small modal">
-        <div class="header"><i class="keyboard icon"></i> Keyboard Shortcuts</div>
-        <div class="content">
-            <div class="shortcut-grid">
-                <div class="shortcut-row">
-                    <span>Run Code</span>
-                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>Enter</kbd></span>
-                </div>
-                <div class="shortcut-row">
-                    <span>Save</span>
-                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>S</kbd></span>
-                </div>
-                <div class="shortcut-row">
-                    <span>New File</span>
-                    <span class="shortcut-keys"><kbd>Shift</kbd><kbd>Alt</kbd><kbd>N</kbd></span>
-                </div>
-                <div class="shortcut-row">
-                    <span>Open File</span>
-                    <span class="shortcut-keys"><kbd>Shift</kbd><kbd>Alt</kbd><kbd>O</kbd></span>
-                </div>
-                <div class="shortcut-row">
-                    <span>Download File</span>
-                    <span class="shortcut-keys"><kbd>Shift</kbd><kbd>Alt</kbd><kbd>D</kbd></span>
-                </div>
-                <div class="shortcut-row">
-                    <span>Increase Font</span>
-                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>+</kbd></span>
-                </div>
-                <div class="shortcut-row">
-                    <span>Decrease Font</span>
-                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>-</kbd></span>
-                </div>
-                <div class="shortcut-row">
-                    <span>Reset Font</span>
-                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>0</kbd></span>
-                </div>
-                <div class="shortcut-row">
-                    <span>Focus Editor</span>
-                    <span class="shortcut-keys"><kbd>Ctrl/⌘</kbd><kbd>`</kbd></span>
-                </div>
-                <div class="shortcut-row">
-                    <span>Show Shortcuts</span>
-                    <span class="shortcut-keys"><kbd>?</kbd></span>
-                </div>
-            </div>
-        </div>
-        <div class="actions">
-            <div class="ui cancel secondary button">Close</div>
-        </div>
-    </div>
-    <!--END Keyboard Shortcuts Modal-->
 
     <!--Sign in Modal for CSCI-->
     <div id="judge0-csci-sign-in-modal" class="ui modal" autocomplete="off">
