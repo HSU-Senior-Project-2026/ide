@@ -947,6 +947,10 @@ document.addEventListener("DOMContentLoaded", async function () {
                 snippetSuggestions: "none"
             });
 
+            // Disable F1 command palette and right-click context menu
+            sourceEditor.addCommand(monaco.KeyCode.F1, function () {});
+            sourceEditor.updateOptions({ contextmenu: false });
+
             // When the user types in the source editor, mark file as modified
            sourceEditor.onDidChangeModelContent(function () {
                 if (suppressDirty) return;   // ignore changes caused by setValue/openFile/init
