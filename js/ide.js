@@ -469,6 +469,22 @@ function setSourceCodeName(name) {
     return $(".lm_title")[0].innerText;
 }*/
 
+function newFile(filename) {
+    clear();
+    suppressDirty = true;
+    sourceEditor.setValue("");
+    suppressDirty = false;
+
+    selectLanguageForExtension(filename.split(".").pop());
+    setSourceCodeName(filename);
+
+    hasUnsavedChanges = false;
+    updateSourceTabTitle();
+
+    // Clear saved source so refresh starts fresh with the new file
+    try { localStorage.removeItem("judge0.sourceCode"); } catch (e) {}
+}
+
 function openFile(content, filename) {
     clear();
 
@@ -673,7 +689,11 @@ async function getLanguage(flavor, languageId) {
 
 function setDefaults() {
     setFontSizeForAllEditors(fontSize);
-    sourceEditor.setValue(DEFAULT_SOURCE);
+
+    // Restore source code from localStorage, or use default
+    var savedSource = localStorage.getItem("judge0.sourceCode");
+    sourceEditor.setValue(savedSource !== null ? savedSource : DEFAULT_SOURCE);
+
     stdinEditor.setValue(DEFAULT_STDIN);
     $compilerOptions.val(DEFAULT_COMPILER_OPTIONS);
     $commandLineArguments.val(DEFAULT_CMD_ARGUMENTS);
@@ -690,6 +710,9 @@ function clear() {
     $commandLineArguments.val("");
 
     $statusLine.html("");
+
+    // Clear saved source code from localStorage
+    try { localStorage.removeItem("judge0.sourceCode"); } catch (e) {}
 }
 
 function refreshSiteContentHeight() {
@@ -720,13 +743,26 @@ document.addEventListener("DOMContentLoaded", async function () {
     $selectLanguage.change(function (event, data) {
         let skipSetDefaultSourceCodeName = (data && data.skipSetDefaultSourceCodeName) || !!gPuterFile;
         loadSelectedLanguage(skipSetDefaultSourceCodeName);
+
+        // Persist selected language to localStorage
+        try {
+            localStorage.setItem("judge0.languageId", getSelectedLanguageId());
+            localStorage.setItem("judge0.languageFlavor", getSelectedLanguageFlavor());
+        } catch (e) {}
     });
 
     await loadLangauges();
-    // Default editor language for MVP
-    const JAVA_ID = "91"; // replace after you confirm
-    $selectLanguage.parent(".ui.dropdown").dropdown("set selected", JAVA_ID);
-    loadSelectedLanguage(true); // ensure Monaco updates; true avoids filename reset
+
+    // Restore saved language or default to Java
+    var savedLangId = localStorage.getItem("judge0.languageId");
+    var savedLangFlavor = localStorage.getItem("judge0.languageFlavor");
+    if (savedLangId && savedLangFlavor) {
+        selectLanguageByFlavorAndId(parseInt(savedLangId), savedLangFlavor);
+    } else {
+        const JAVA_ID = "91";
+        $selectLanguage.parent(".ui.dropdown").dropdown("set selected", JAVA_ID);
+    }
+    loadSelectedLanguage(true);
 
     $compilerOptions = $("#compiler-options");
     $commandLineArguments = $("#command-line-arguments");
@@ -770,6 +806,10 @@ document.addEventListener("DOMContentLoaded", async function () {
                 case "o":
                     e.preventDefault();
                     openAction();
+                    break;
+                case "n":
+                    e.preventDefault();
+                    document.getElementById("judge0-new-file-btn").click();
                     break;
                 case "+":
                 case "=":
@@ -835,6 +875,9 @@ document.addEventListener("DOMContentLoaded", async function () {
                 hasUnsavedChanges = true;
                 updateSourceTabTitle();
                 scheduleAutosave();         // schedule an autosave after user stops typing for a bit
+
+                // Persist source code to localStorage
+                try { localStorage.setItem("judge0.sourceCode", sourceEditor.getValue()); } catch (e) {}
             });
 
              // After initial editor setup/content load finishes, mark file as clean and enable dirty tracking
@@ -1019,6 +1062,30 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     document.getElementById("judge0-open-file-btn").addEventListener("click", openAction);
     document.getElementById("judge0-save-btn").addEventListener("click", saveAction);
+
+    // New File modal handlers
+    document.getElementById("judge0-new-file-btn").addEventListener("click", function () {
+        $("#new-file-name").val("");
+        $("#judge0-new-file-modal").modal({ closable: true }).modal("show");
+        setTimeout(function () { document.getElementById("new-file-name").focus(); }, 100);
+    });
+    document.getElementById("judge0-new-file-create-btn").addEventListener("click", function () {
+        var filename = document.getElementById("new-file-name").value.trim();
+        if (!filename) {
+            alert("Please enter a filename.");
+            return;
+        }
+        newFile(filename);
+        $("#judge0-new-file-modal").modal("hide");
+    });
+    document.getElementById("judge0-new-file-cancel-btn").addEventListener("click", function () {
+        $("#judge0-new-file-modal").modal("hide");
+    });
+    // Allow pressing Enter to create the file
+    document.getElementById("judge0-new-file-form").addEventListener("submit", function (e) {
+        e.preventDefault();
+        document.getElementById("judge0-new-file-create-btn").click();
+    });
 
     window.onmessage = function (e) {
         if (!e.data) {
