@@ -1,9 +1,3 @@
-html, body {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-}
-
 .judge0-file-menu {
     min-width: 15rem !important;
 }
@@ -22,12 +16,10 @@ html, body {
 #judge0-chat-messages {
     flex-grow: 1;
     overflow-y: auto;
-    padding: 0.5rem;
 }
 
 #judge0-chat-messages pre {
     overflow-x: auto;
-    max-width: 100%;
 }
 
 .item.judge0-showRunButton{
@@ -61,24 +53,3 @@ html, body {
         display: none !important;
     }
 }
-
-@media (max-width: 600px) {
-    .judge0-file-menu {
-        min-width: 12rem !important;
-    }
-
-    .item.judge0-showRunButton {
-        flex-direction: column;
-        gap: 5px;
-    }
-
-    .judge0-user-message {
-        max-width: 95%;
-        margin-right: 0.5em !important;
-    }
-
-    #judge0-chat-messages {
-        padding: 0.25rem;
-    }
-}
-

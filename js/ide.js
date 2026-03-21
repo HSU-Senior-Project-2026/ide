@@ -1,24 +1,24 @@
 import { usePuter } from "./puter.js";
 import configuration from "./configuration.js";
 
-const API_KEY = "";
+const API_KEY = "yjjcWNpQGFQMkpmHQasOKegTvGL8yZ1sI4WM7YYkCuVoUwYt";
 
-const AUTH_HEADERS = API_KEY ? {
-    "Authorization": `Bearer ${API_KEY}`
-} : {};
+const AUTH_HEADERS = {
+    "X-Auth-Token": API_KEY
+};
 
 const CE = "CE";
 const EXTRA_CE = "EXTRA_CE";
 
-const AUTHENTICATED_CE_BASE_URL = "https://ce.judge0.com";
-const AUTHENTICATED_EXTRA_CE_BASE_URL = "https://extra-ce.judge0.com";
+const AUTHENTICATED_CE_BASE_URL = "http://localhost:2358";
+const AUTHENTICATED_EXTRA_CE_BASE_URL = "http://localhost:2358";
 
 var AUTHENTICATED_BASE_URL = {};
 AUTHENTICATED_BASE_URL[CE] = AUTHENTICATED_CE_BASE_URL;
 AUTHENTICATED_BASE_URL[EXTRA_CE] = AUTHENTICATED_EXTRA_CE_BASE_URL;
 
-const UNAUTHENTICATED_CE_BASE_URL = "https://ce.judge0.com";
-const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "https://extra-ce.judge0.com";
+const UNAUTHENTICATED_CE_BASE_URL = "http://localhost:2358";
+const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "http://localhost:2358";
 
 var UNAUTHENTICATED_BASE_URL = {};
 UNAUTHENTICATED_BASE_URL[CE] = UNAUTHENTICATED_CE_BASE_URL;
@@ -56,8 +56,8 @@ var $runBtn;
 var $clearBtn;
 var $statusLine;
 var $compileBtn;
-var lastCompiledCode=null;
-
+var isCompileButtonClicked = false; //Variable to monitor compile button
+var compiledCode = null; //Variable to store code of the user
 
 var timeStart;
 
@@ -184,7 +184,7 @@ function handleResult(data) {
     const status = data.status;
     const stdout = decode(data.stdout);
     const stderr = decode(data.stderr);
-    const compileOutput = data.compile_output ? decode(data.compile_output) : null;
+    const compileOutput = decode(data.compile_output);
     const time = (data.time === null ? "-" : data.time + "s");
     const memory = (data.memory === null ? "-" : data.memory + "KB");
 
@@ -192,7 +192,7 @@ function handleResult(data) {
 
     /*const output = [compileOutput, stdout].filter(x => x).join("\n").trimEnd();
     stdoutEditor.setValue(output);*/
-    
+
     const runtimeOutput = [stdout, stderr].filter(x => x).join("\n").trimEnd();
     const compileText = (compileOutput || "").trimEnd();
 
@@ -209,7 +209,7 @@ function handleResult(data) {
         runOutEditor.revealLine(lastLine);
     }
     const output = [compileText, runtimeOutput].filter(x => x).join("\n").trimEnd();
-    
+
     $runBtn.removeClass("loading");
 
     window.top.postMessage(JSON.parse(JSON.stringify({
@@ -248,27 +248,16 @@ function getSelectedLanguageFlavor() {
 }
 
 function compileOnly() {
-    const currentCode = sourceEditor.getValue().trim();
-
-    if (currentCode === "") {
+    compiledCode = sourceEditor.getValue().trim();
+    if (sourceEditor.getValue().trim() === "") {
         showError("Error", "Source code can't be empty!");
-        lastCompiledCode = null;
-        updateRunButtonState();
         return;
     }
-
-    lastCompiledCode = null;
-    updateRunButtonState();
 
     if (compileOutEditor) compileOutEditor.setValue("");
     if (runOutEditor) runOutEditor.setValue("");
 
     $statusLine.html("Compiling...");
-    // Switch to Compile tab when compiling
-    const compileTab = layout.root.getItemsById("compileOut")[0];
-    if (compileTab && compileTab.parent && compileTab.parent.header && compileTab.parent.header.parent) {
-        compileTab.parent.header.parent.setActiveContentItem(compileTab);
-    }
 
     let sourceValue = encode(sourceEditor.getValue());
     let languageId = getSelectedLanguageId();
@@ -285,8 +274,8 @@ function compileOnly() {
         url: `${AUTHENTICATED_BASE_URL[flavor]}/submissions?base64_encoded=true&wait=true`,
         type: "POST",
         contentType: "application/json",
-        data: JSON.stringify(data),
         headers: AUTH_HEADERS,
+        data: JSON.stringify(data),
         success: function (data) {
             const compileOutput = decode(data.compile_output);
 
@@ -301,50 +290,28 @@ function compileOnly() {
             }
 
             $statusLine.html(data.status.description);
-
-            // success only when there is no compile output
-            if (!compileOutput) {
-                lastCompiledCode = currentCode;
-            } else {
-                lastCompiledCode = null;
-            }
-
-            updateRunButtonState();
         },
-        error: function (jqXHR) {
-            lastCompiledCode = null;
-            updateRunButtonState();
-            handleRunError(jqXHR);
-        }
+        error: handleRunError
     });
+    isCompileButtonClicked = true;	//No errors for compile button, so can now make a valid run attempt
 }
 
-function updateRunButtonState() {
-    if (!$runBtn) return;
-
-    const currentCode = sourceEditor ? sourceEditor.getValue().trim() : "";
-    const canRun = !!lastCompiledCode && currentCode === lastCompiledCode;
-
-    $runBtn.prop("disabled", !canRun);
-
-    if (canRun) {
-        $runBtn.removeClass("disabled");
-        $runBtn.addClass("primary");
-    } else {
-        $runBtn.addClass("disabled");
-        $runBtn.removeClass("primary");
-    }
-}
 
 function run() {
-    const currentCode = sourceEditor.getValue().trim();
-
-    if (!lastCompiledCode || currentCode !== lastCompiledCode) {
-        updateRunButtonState();
+    if (sourceEditor.getValue().trim() === "") {
+        showError("Error", "Source code can't be empty!");
         return;
     }
-
-    $runBtn.addClass("loading"); 
+    if (compiledCode !== sourceEditor.getValue().trim()) {
+        showError("Error", "Code has changed, must compile code first!");
+        return;
+    }
+    if (!isCompileButtonClicked) {	//Checks to see if compile button is clicked		
+        showError("Error", "Must compile code first");
+        return;
+    }
+    $runBtn.addClass("loading");
+    isCompileButtonClicked = false; 	//Resets compile button boolean for next run attempt
 
     //stdoutEditor.setValue("");
     if (compileOutEditor) compileOutEditor.setValue("");
@@ -396,8 +363,8 @@ function run() {
             url: `${AUTHENTICATED_BASE_URL[flavor]}/submissions?base64_encoded=true&wait=false`,
             type: "POST",
             contentType: "application/json",
-            data: JSON.stringify(data),
             headers: AUTH_HEADERS,
+            data: JSON.stringify(data),
             success: function (data, textStatus, request) {
                 console.log(`Your submission token is: ${data.token}`);
                 let region = request.getResponseHeader('X-Judge0-Region');
@@ -441,6 +408,7 @@ function fetchSubmission(flavor, region, submission_token, iteration) {
     $.ajax({
         url: `${UNAUTHENTICATED_BASE_URL[flavor]}/submissions/${submission_token}?base64_encoded=true`,
         headers: {
+            ...AUTH_HEADERS,
             "X-Judge0-Region": region
         },
         success: function (data) {
@@ -457,17 +425,17 @@ function fetchSubmission(flavor, region, submission_token, iteration) {
 
 // Helper function to update the source tab title with unsaved changes indicator and saving status
 function updateSourceTabTitle() {
-  if (!sourceContainer) return; // source tab not ready yet
+    if (!sourceContainer) return; // source tab not ready yet
 
-  var dot = hasUnsavedChanges ? " •" : "";
-  var saving = isSaving ? " — Saving..." : "";
-  sourceContainer.setTitle(currentFileName + dot + saving);
+    var dot = hasUnsavedChanges ? " •" : "";
+    var saving = isSaving ? " — Saving..." : "";
+    sourceContainer.setTitle(currentFileName + dot + saving);
 }
 
 
 function setSourceCodeName(name) {
-  currentFileName = name;
-  updateSourceTabTitle();
+    currentFileName = name;
+    updateSourceTabTitle();
 }
 
 /*function setSourceCodeName(name) {
@@ -493,30 +461,30 @@ function openFile(content, filename) {
 }
 
 function saveNow(reason) {
-  if (!sourceEditor) return;
+    if (!sourceEditor) return;
 
-  isSaving = true;
-  updateSourceTabTitle();
+    isSaving = true;
+    updateSourceTabTitle();
 
-  var content = sourceEditor.getValue();
+    var content = sourceEditor.getValue();
 
-  // MVP: save to localStorage (silent autosave)
-  localStorage.setItem("autosave:" + currentFileName, content);
+    // MVP: save to localStorage (silent autosave)
+    localStorage.setItem("autosave:" + currentFileName, content);
 
-  isSaving = false;
-  hasUnsavedChanges = false;
-  updateSourceTabTitle();
+    isSaving = false;
+    hasUnsavedChanges = false;
+    updateSourceTabTitle();
 }
 
 // Schedules an automatic save after the user stops typing
 function scheduleAutosave() {
-  if (autosaveTimer) clearTimeout(autosaveTimer);
+    if (autosaveTimer) clearTimeout(autosaveTimer);
 
-  autosaveTimer = setTimeout(function () {
-    // Only save if there are unsaved changes
-    if (!hasUnsavedChanges) return;
-    saveNow("idle");
-  }, AUTOSAVE_MS);
+    autosaveTimer = setTimeout(function () {
+        // Only save if there are unsaved changes
+        if (!hasUnsavedChanges) return;
+        saveNow("idle");
+    }, AUTOSAVE_MS);
 }
 
 function saveFile(content, filename) {
@@ -566,6 +534,7 @@ async function loadLangauges() {
 
         $.ajax({
             url: UNAUTHENTICATED_CE_BASE_URL + "/languages",
+            headers: AUTH_HEADERS,
             success: function (data) {
                 for (let i = 0; i < data.length; i++) {
                     let language = data[i];
@@ -586,6 +555,7 @@ async function loadLangauges() {
         }).always(function () {
             $.ajax({
                 url: UNAUTHENTICATED_EXTRA_CE_BASE_URL + "/languages",
+                headers: AUTH_HEADERS,
                 success: function (data) {
                     for (let i = 0; i < data.length; i++) {
                         let language = data[i];
@@ -642,6 +612,7 @@ async function getLanguage(flavor, languageId) {
 
         $.ajax({
             url: `${UNAUTHENTICATED_BASE_URL[flavor]}/languages/${languageId}`,
+            headers:AUTH_HEADERS,
             success: function (data) {
                 if (!languages[flavor]) {
                     languages[flavor] = {};
@@ -707,6 +678,10 @@ document.addEventListener("DOMContentLoaded", async function () {
     });
 
     await loadLangauges();
+    //TEST CODE
+    /*loadLangauges().catch(err => {
+        console.error(err);
+    });*/
     // Default editor language for MVP
     const JAVA_ID = "91"; // replace after you confirm
     $selectLanguage.parent(".ui.dropdown").dropdown("set selected", JAVA_ID);
@@ -716,8 +691,6 @@ document.addEventListener("DOMContentLoaded", async function () {
     $commandLineArguments = $("#command-line-arguments");
 
     $runBtn = $("#run-btn");
-    updateRunButtonState();
-
     $clearBtn = $("#clear-btn");
     $compileBtn = $("#compile-btn");
     $runBtn.click(run);
@@ -800,7 +773,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 formatOnType: false,
                 formatOnPaste: false,
 
-                 //Disable automatic bracket/quote closing
+                //Disable automatic bracket/quote closing
                 autoClosingBrackets: "never",
                 autoClosingQuotes: "never",
                 autoSurround: "never",
@@ -816,14 +789,14 @@ document.addEventListener("DOMContentLoaded", async function () {
             });
 
             // When the user types in the source editor, mark file as modified
-           sourceEditor.onDidChangeModelContent(function () {
+            sourceEditor.onDidChangeModelContent(function () {
                 if (suppressDirty) return;   // ignore changes caused by setValue/openFile/init
                 hasUnsavedChanges = true;
                 updateSourceTabTitle();
                 scheduleAutosave();         // schedule an autosave after user stops typing for a bit
             });
 
-             // After initial editor setup/content load finishes, mark file as clean and enable dirty tracking
+            // After initial editor setup/content load finishes, mark file as clean and enable dirty tracking
             setTimeout(function () {
                 hasUnsavedChanges = false;
                 suppressDirty = false;
@@ -836,11 +809,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
             sourceEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
 
-            sourceEditor.onDidChangeModelContent(() => {
-                lastCompiledCode = null;
-                updateRunButtonState();
-            });
-            /*monaco.languages.registerInlineCompletionsProvider('*', {
+            monaco.languages.registerInlineCompletionsProvider('*', {
                 provideInlineCompletions: async (model, position) => {
                     if (!puter.auth.isSignedIn() || !document.getElementById("judge0-inline-suggestions").checked || !configuration.get("appOptions.showAIAssistant")) {
                         return;
@@ -908,7 +877,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 },
                 handleItemDidShow: () => { },
                 freeInlineCompletions: () => { }
-            });*/
+            });
         });
 
         layout.registerComponent("stdin", function (container, state) {
@@ -941,7 +910,8 @@ document.addEventListener("DOMContentLoaded", async function () {
                 scrollBeyondLastLine: false,
                 readOnly: true,
                 language: "plaintext",
-                minimap: { enabled: false 
+                minimap: {
+                    enabled: false
                 }
             });
         });
@@ -952,7 +922,8 @@ document.addEventListener("DOMContentLoaded", async function () {
                 scrollBeyondLastLine: false,
                 readOnly: true,
                 language: "plaintext",
-                minimap: { enabled: false 
+                minimap: {
+                    enabled: false
                 }
             });
         });
@@ -1029,7 +1000,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 $commandLineArguments.val(e.data.command_line_arguments);
             }
             if (e.data.api_key) {
-                AUTH_HEADERS["Authorization"] = `Bearer ${e.data.api_key}`;
+                AUTH_HEADERS["X-Auth-Token"] = e.data.api_key;
             }
         } else if (e.data.action === "run") {
             run();
@@ -1038,131 +1009,18 @@ document.addEventListener("DOMContentLoaded", async function () {
 });
 
 const DEFAULT_SOURCE = "\
-#include <algorithm>\n\
-#include <cstdint>\n\
-#include <iostream>\n\
-#include <limits>\n\
-#include <set>\n\
-#include <utility>\n\
-#include <vector>\n\
-\n\
-using Vertex    = std::uint16_t;\n\
-using Cost      = std::uint16_t;\n\
-using Edge      = std::pair< Vertex, Cost >;\n\
-using Graph     = std::vector< std::vector< Edge > >;\n\
-using CostTable = std::vector< std::uint64_t >;\n\
-\n\
-constexpr auto kInfiniteCost{ std::numeric_limits< CostTable::value_type >::max() };\n\
-\n\
-auto dijkstra( Vertex const start, Vertex const end, Graph const & graph, CostTable & costTable )\n\
-{\n\
-    std::fill( costTable.begin(), costTable.end(), kInfiniteCost );\n\
-    costTable[ start ] = 0;\n\
-\n\
-    std::set< std::pair< CostTable::value_type, Vertex > > minHeap;\n\
-    minHeap.emplace( 0, start );\n\
-\n\
-    while ( !minHeap.empty() )\n\
-    {\n\
-        auto const vertexCost{ minHeap.begin()->first  };\n\
-        auto const vertex    { minHeap.begin()->second };\n\
-\n\
-        minHeap.erase( minHeap.begin() );\n\
-\n\
-        if ( vertex == end )\n\
-        {\n\
-            break;\n\
-        }\n\
-\n\
-        for ( auto const & neighbourEdge : graph[ vertex ] )\n\
-        {\n\
-            auto const & neighbour{ neighbourEdge.first };\n\
-            auto const & cost{ neighbourEdge.second };\n\
-\n\
-            if ( costTable[ neighbour ] > vertexCost + cost )\n\
-            {\n\
-                minHeap.erase( { costTable[ neighbour ], neighbour } );\n\
-                costTable[ neighbour ] = vertexCost + cost;\n\
-                minHeap.emplace( costTable[ neighbour ], neighbour );\n\
-            }\n\
-        }\n\
-    }\n\
-\n\
-    return costTable[ end ];\n\
-}\n\
-\n\
-int main()\n\
-{\n\
-    constexpr std::uint16_t maxVertices{ 10000 };\n\
-\n\
-    Graph     graph    ( maxVertices );\n\
-    CostTable costTable( maxVertices );\n\
-\n\
-    std::uint16_t testCases;\n\
-    std::cin >> testCases;\n\
-\n\
-    while ( testCases-- > 0 )\n\
-    {\n\
-        for ( auto i{ 0 }; i < maxVertices; ++i )\n\
-        {\n\
-            graph[ i ].clear();\n\
-        }\n\
-\n\
-        std::uint16_t numberOfVertices;\n\
-        std::uint16_t numberOfEdges;\n\
-\n\
-        std::cin >> numberOfVertices >> numberOfEdges;\n\
-\n\
-        for ( auto i{ 0 }; i < numberOfEdges; ++i )\n\
-        {\n\
-            Vertex from;\n\
-            Vertex to;\n\
-            Cost   cost;\n\
-\n\
-            std::cin >> from >> to >> cost;\n\
-            graph[ from ].emplace_back( to, cost );\n\
-        }\n\
-\n\
-        Vertex start;\n\
-        Vertex end;\n\
-\n\
-        std::cin >> start >> end;\n\
-\n\
-        auto const result{ dijkstra( start, end, graph, costTable ) };\n\
-\n\
-        if ( result == kInfiniteCost )\n\
-        {\n\
-            std::cout << \"NO\\n\";\n\
-        }\n\
-        else\n\
-        {\n\
-            std::cout << result << '\\n';\n\
-        }\n\
-    }\n\
-\n\
-    return 0;\n\
-}\n\
-";
+public class Main {\n\
+    public static void main(String[] args) {\n\
+        System.out.println(\"Hello, World!\"); }\n\
+}";
 
 const DEFAULT_STDIN = "\
 3\n\
-3 2\n\
-1 2 5\n\
-2 3 7\n\
-1 3\n\
-3 3\n\
-1 2 4\n\
-1 3 7\n\
-2 3 1\n\
-1 3\n\
-3 1\n\
-1 2 4\n\
-1 3\n\
 ";
 
 const DEFAULT_COMPILER_OPTIONS = "";
 const DEFAULT_CMD_ARGUMENTS = "";
-const DEFAULT_LANGUAGE_ID = 105; // C++ (GCC 14.1.0) (https://ce.judge0.com/languages/105)
+const DEFAULT_LANGUAGE_ID = 62; // Java (OpenJDK 13.0.1) (https://ce.judge0.com/languages/62)
 
 function getEditorLanguageMode(languageName) {
     const DEFAULT_EDITOR_LANGUAGE_MODE = "plaintext";
