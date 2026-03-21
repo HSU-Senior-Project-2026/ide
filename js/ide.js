@@ -238,7 +238,7 @@ function handleResult(data) {
     const status = data.status;
     const stdout = decode(data.stdout);
     const stderr = decode(data.stderr);
-    const compileOutput = decode(data.compile_output);
+    const compileOutput = data.compile_output ? decode(data.compile_output) : null;
     const time = (data.time === null ? "-" : data.time + "s");
     const memory = (data.memory === null ? "-" : data.memory + "KB");
 
@@ -315,6 +315,8 @@ function compileOnly() {
     compiledCode = sourceEditor.getValue().trim();
     if (sourceEditor.getValue().trim() === "") {
         showError("Error", "Source code can't be empty!");
+        lastCompiledCode = null;
+        updateRunButtonState();
         return;
     }
 
@@ -826,6 +828,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     $commandLineArguments = $("#command-line-arguments");
 
     $runBtn = $("#run-btn");
+    updateRunButtonState();
+
     $clearBtn = $("#clear-btn");
     $compileBtn = $("#compile-btn");
     $runBtn.click(run);
@@ -975,6 +979,10 @@ document.addEventListener("DOMContentLoaded", async function () {
 
             sourceEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
 
+            sourceEditor.onDidChangeModelContent(() => {
+                lastCompiledCode = null;
+                updateRunButtonState();
+            });
             /*monaco.languages.registerInlineCompletionsProvider('*', {
                 provideInlineCompletions: async (model, position) => {
                     if (!puter.auth.isSignedIn() || !document.getElementById("judge0-inline-suggestions").checked || !configuration.get("appOptions.showAIAssistant")) {
