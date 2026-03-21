@@ -678,10 +678,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     });
 
     await loadLangauges();
-    //TEST CODE
-    /*loadLangauges().catch(err => {
-        console.error(err);
-    });*/
+    
     // Default editor language for MVP
     const JAVA_ID = "91"; // replace after you confirm
     $selectLanguage.parent(".ui.dropdown").dropdown("set selected", JAVA_ID);
