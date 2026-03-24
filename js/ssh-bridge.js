@@ -26,10 +26,17 @@ app.get("/", (req, res) => {
 });
 
 // Proxy all /judge0/* requests to the Judge0 backend on port 2358
+// The proxy injects the auth token so the browser never needs to handle it
+const JUDGE0_AUTH_TOKEN = "yjjcWNpQGFQMkpmHQasOKegTvGL8yZ1sI4WM7YYkCuVoUwYt";
 app.use("/judge0", createProxyMiddleware({
   target: "http://localhost:2358",
   changeOrigin: true,
-  pathRewrite: { "^/judge0": "" }
+  pathRewrite: { "^/judge0": "" },
+  on: {
+    proxyReq: (proxyReq) => {
+      proxyReq.setHeader("X-Auth-Token", JUDGE0_AUTH_TOKEN);
+    }
+  }
 }));
 
 // Variable to hold active SSH session

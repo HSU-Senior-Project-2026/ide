@@ -3,9 +3,7 @@ import configuration from "./configuration.js";
 
 const API_KEY = "yjjcWNpQGFQMkpmHQasOKegTvGL8yZ1sI4WM7YYkCuVoUwYt";
 
-const AUTH_HEADERS = API_KEY ? {
-    "X-Auth-Token": API_KEY
-} : {};
+const AUTH_HEADERS = {};
 
 const CE = "CE";
 const EXTRA_CE = "EXTRA_CE";
