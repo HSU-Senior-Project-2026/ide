@@ -4,6 +4,7 @@ const express = require("express");
 const { Client } = require("ssh2");
 const http = require("http");
 const path = require("path");
+const { createProxyMiddleware } = require("http-proxy-middleware");
 
 const app = express();
 
@@ -23,6 +24,13 @@ app.use((req, res, next) => {
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "index.html"));
 });
+
+// Proxy all /judge0/* requests to the Judge0 backend on port 2358
+app.use("/judge0", createProxyMiddleware({
+  target: "http://localhost:2358",
+  changeOrigin: true,
+  pathRewrite: { "^/judge0": "" }
+}));
 
 // Variable to hold active SSH session
 let sshSession = null;
