@@ -4,7 +4,7 @@ import configuration from "./configuration.js";
 const API_KEY = "yjjcWNpQGFQMkpmHQasOKegTvGL8yZ1sI4WM7YYkCuVoUwYt";
 
 const AUTH_HEADERS = API_KEY ? {
-    "Authorization": `Bearer ${API_KEY}`
+    "X-Auth-Token": API_KEY
 } : {};
 
 const CE = "CE";
