@@ -968,6 +968,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         });
 
         layout.init();
+        makeTabsAccessible();
     });
 
     let superKey = "⌘";
@@ -1223,4 +1224,40 @@ const EXTENSIONS_TABLE = {
 
 function getLanguageForExtension(extension) {
     return EXTENSIONS_TABLE[extension] || { "flavor": CE, "language_id": 43 }; // Plain Text (https://ce.judge0.com/languages/43)
+}
+
+function makeTabsAccessible() {
+    console.log("makeTabsAccessible ran");
+
+    const tabs = document.querySelectorAll('.lm_tab');
+    console.log("Tabs found:", tabs.length);
+
+    tabs.forEach(tab => {
+        // Make focusable
+        tab.setAttribute('tabindex', '0');
+
+        // Add role
+        tab.setAttribute('role', 'tab');
+
+        // Set aria-selected
+        if (tab.classList.contains('lm_active')) {
+            tab.setAttribute('aria-selected', 'true');
+        } else {
+        tab.setAttribute('aria-selected', 'false');
+        }
+
+        // Keyboard support
+        tab.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            tab.click();
+        }
+        });
+    });
+
+    // Add tablist role to parent
+    const tablist = document.querySelector('.lm_tabs');
+    if (tablist) {
+        tablist.setAttribute('role', 'tablist');
+    }
 }
