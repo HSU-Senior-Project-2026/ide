@@ -84,6 +84,39 @@ app.post("/ssh-sign-in", (req, res) => {
   });
 });
 
+//Signin limits
+const MAX_ATTEMPTS = 5;
+const LOCK_TIME = 15 * 60 * 1000;
+
+app.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  const user = await User.findOne({ username });
+  if (!user) return res.status(400).send('User not found');
+
+  if (user.lockUntil && user.lockUntil > Date.now()) {
+    return res.status(403).send('Account locked. Try later.');
+  }
+
+  const isMatch = await bcrypt.compare(password, user.passwordHash);
+
+  if (isMatch) {
+    user.loginAttempts = 0;
+    user.lockUntil = undefined;
+    await user.save();
+    return res.send('Logged in!');
+  } else {
+    user.loginAttempts += 1;
+
+    if (user.loginAttempts >= MAX_ATTEMPTS) {
+      user.lockUntil = Date.now() + LOCK_TIME;
+    }
+
+    await user.save();
+    return res.status(401).send('Wrong password');
+  }
+});
+
+
 // SSH endpoint for sign-out
 app.post("/ssh-sign-out", (req, res) => {
   console.log("Sign-out request received:", req.body);
