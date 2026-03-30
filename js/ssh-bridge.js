@@ -5,6 +5,7 @@ const { Client } = require("ssh2");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const http = require("http");
 const path = require("path");
+const session = require("express-session");
 
 const app = express();
 
@@ -22,6 +23,16 @@ app.use("/judge0", createProxyMiddleware({
     proxyReq: (proxyReq) => {
       proxyReq.setHeader("X-Auth-Token", JUDGE0_AUTH_TOKEN);
     }
+  }
+}));
+
+// Session Expiration
+app.use(session({
+  secret: "secret-key",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 15 * 60 * 1000
   }
 }));
 
@@ -61,6 +72,7 @@ app.post("/ssh-sign-in", (req, res) => {
   conn.on("ready", () => {
     console.log(`[SSH LOGIN SUCCESS] username: ${username}`);
     sshSession = conn; // keep the session active for sign-out
+    req.session.user = username;//create a session when login in
     if (!responded) {
       responded = true;
       res.json({ success: true, message: "SSH connection established" });
@@ -105,4 +117,13 @@ app.post("/ssh-sign-out", (req, res) => {
 // Start HTTP server on port 80
 http.createServer(app).listen(80, "0.0.0.0", () => {
   console.log("Server running on http://localhost:80");
+});
+
+//protected test
+app.get("/protected", (req, res) => {
+  if (!req.session.user) {
+    return res.status(401).json({ error: "Session expired" });
+  }
+
+  res.json({ message: "Welcome " + req.session.user });
 });
