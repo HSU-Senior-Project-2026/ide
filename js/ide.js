@@ -1,24 +1,22 @@
 import { usePuter } from "./puter.js";
 import configuration from "./configuration.js";
 
-const API_KEY = "";
-
-const AUTH_HEADERS = API_KEY ? {
-    "Authorization": `Bearer ${API_KEY}`
-} : {};
+// API key and auth are handled server-side by the ssh-bridge proxy — not needed here
+const AUTH_HEADERS = {};
 
 const CE = "CE";
 const EXTRA_CE = "EXTRA_CE";
 
-const AUTHENTICATED_CE_BASE_URL = "https://ce.judge0.com";
-const AUTHENTICATED_EXTRA_CE_BASE_URL = "https://extra-ce.judge0.com";
+// Relative URL: browser calls /judge0/... on port 80, proxy forwards to localhost:2358
+const AUTHENTICATED_CE_BASE_URL = "/judge0";
+const AUTHENTICATED_EXTRA_CE_BASE_URL = "/judge0";
 
 var AUTHENTICATED_BASE_URL = {};
 AUTHENTICATED_BASE_URL[CE] = AUTHENTICATED_CE_BASE_URL;
 AUTHENTICATED_BASE_URL[EXTRA_CE] = AUTHENTICATED_EXTRA_CE_BASE_URL;
 
-const UNAUTHENTICATED_CE_BASE_URL = "https://ce.judge0.com";
-const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "https://extra-ce.judge0.com";
+const UNAUTHENTICATED_CE_BASE_URL = "/judge0";
+const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "/judge0";
 
 var UNAUTHENTICATED_BASE_URL = {};
 UNAUTHENTICATED_BASE_URL[CE] = UNAUTHENTICATED_CE_BASE_URL;
@@ -56,8 +54,7 @@ var $runBtn;
 var $clearBtn;
 var $statusLine;
 var $compileBtn;
-var isCompileButtonClicked = false; //Variable to monitor compile button
-var compiledCode = null; //Variable to store code of the user
+var lastCompiledCode = null;
 
 var timeStart;
 
@@ -213,7 +210,7 @@ function showError(title, content) {
         `**Description**:\n${content}`
     );
 
-    $("#report-problem-btn").attr("href", `https://github.com/judge0/ide/issues/new?title=${reportTitle}&body=${reportBody}`);
+    $("#report-problem-btn").attr("href", `https://github.com/judge0/ide/issues/new?title=${FTitle}&body=${reportBody}`);
     $("#judge0-site-modal").modal("show");
 }
 
@@ -312,20 +309,23 @@ function setCompileButtonLoading(loading) {
 }
 
 function compileOnly() {
-    compiledCode = sourceEditor.getValue().trim();
-    if (sourceEditor.getValue().trim() === "") {
+    const currentCode = sourceEditor.getValue().trim();
+
+    if (currentCode === "") {
         showError("Error", "Source code can't be empty!");
         lastCompiledCode = null;
         updateRunButtonState();
         return;
     }
 
+    lastCompiledCode = null;
+    updateRunButtonState();
+
     if (compileOutEditor) compileOutEditor.setValue("");
     if (runOutEditor) runOutEditor.setValue("");
 
     $statusLine.html("Compiling...");
-    setCompileButtonLoading(true);
-
+    // Switch to Compile tab when compiling
     const compileTab = layout.root.getItemsById("compileOut")[0];
     if (compileTab) {
         compileTab.parent.header.parent.setActiveContentItem(compileTab);
@@ -365,37 +365,50 @@ function compileOnly() {
 
             highlightErrorLines(compileOutput);
             $statusLine.html(data.status.description);
-            setCompileButtonLoading(false);
+
+            // success only when there is no compile output
+            if (!compileOutput) {
+                lastCompiledCode = currentCode;
+            } else {
+                lastCompiledCode = null;
+            }
+
+            updateRunButtonState();
         },
-        error: function (jqXHR, textStatus, errorThrown) {
-            setCompileButtonLoading(false);
-            handleRunError(jqXHR, textStatus, errorThrown);
+        error: function (jqXHR) {
+            lastCompiledCode = null;
+            updateRunButtonState();
+            handleRunError(jqXHR);
         }
     });
-    isCompileButtonClicked = true;	//No errors for compile button, so can now make a valid run attempt
 }
 
+function updateRunButtonState() {
+    if (!$runBtn) return;
+
+    const currentCode = sourceEditor ? sourceEditor.getValue().trim() : "";
+    const canRun = !!lastCompiledCode && currentCode === lastCompiledCode;
+
+    $runBtn.prop("disabled", !canRun);
+
+    if (canRun) {
+        $runBtn.removeClass("disabled");
+        $runBtn.addClass("primary");
+    } else {
+        $runBtn.addClass("disabled");
+        $runBtn.removeClass("primary");
+    }
+}
 
 function run() {
-    clearErrorHighlights();
-    if (sourceEditor.getValue().trim() === "") {
-        showError("Error", "Source code can't be empty!");
-	return;
+    const currentCode = sourceEditor.getValue().trim();
+
+    if (!lastCompiledCode || currentCode !== lastCompiledCode) {
+        updateRunButtonState();
+        return;
     }
-    let languageId = getSelectedLanguageId();
-    // Only require compile step for compiled languages
-    if (!INTERPRETED_LANGUAGE_IDS.includes(languageId)) {
-        if (compiledCode !== sourceEditor.getValue().trim()){
-            showError("Error", "Code has changed, must compile code first!");
-            return;
-        }
-        if (!isCompileButtonClicked){	//Checks to see if compile button is clicked
-            showError("Error", "Must compile code first");
-            return;
-        }
-    }
+
     $runBtn.addClass("loading");
-    isCompileButtonClicked = false; 	//Resets compile button boolean for next run attempt
 
     //stdoutEditor.setValue("");
     if (compileOutEditor) compileOutEditor.setValue("");
@@ -412,7 +425,7 @@ function run() {
 
     let sourceValue = encode(sourceEditor.getValue());
     let stdinValue = encode(stdinEditor.getValue());
-    languageId = getSelectedLanguageId();
+    let languageId = getSelectedLanguageId();
     let compilerOptions = $compilerOptions.val();
     let commandLineArguments = $commandLineArguments.val();
 
@@ -611,11 +624,11 @@ async function saveAction() {
         if (gPuterFile) {
             gPuterFile.write(sourceEditor.getValue());
         } else {
-            gPuterFile = await puter.ui.showSaveFilePicker(sourceEditor.getValue(), getSourceCodeName());
+            gPuterFile = await puter.ui.showSaveFilePicker(sourceEditor.getValue(), currentFileName);
             setSourceCodeName(gPuterFile.name);
         }
     } else {
-        saveFile(sourceEditor.getValue(), getSourceCodeName());
+        saveFile(sourceEditor.getValue(), currentFileName);
     }
 }
 
@@ -1290,7 +1303,13 @@ document.addEventListener("DOMContentLoaded", async function () {
     };
 });
 
-const DEFAULT_SOURCE = "";
+const DEFAULT_SOURCE = "\
+public class Main {\n\
+    public static void main(String[] args) {\n\
+        System.out.println(\"Hello, World!\");\n\
+    }\n\
+}\n\
+";
 
 const DEFAULT_STDIN = "";
 

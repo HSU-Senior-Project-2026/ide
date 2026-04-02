@@ -2,11 +2,28 @@
 
 const express = require("express");
 const { Client } = require("ssh2");
-const fs = require("fs");
-const https = require("https");
+const { createProxyMiddleware } = require("http-proxy-middleware");
+const http = require("http");
 const path = require("path");
 
 const app = express();
+
+// Judge0 auth token — lives here on the server, never sent to the browser
+const JUDGE0_AUTH_TOKEN = "yjjcWNpQGFQMkpmHQasOKegTvGL8yZ1sI4WM7YYkCuVoUwYt";
+
+// Proxy all /judge0/* requests to the Judge0 backend on port 2358
+// The browser calls /judge0/languages → this strips /judge0 and forwards to localhost:2358/languages
+// The proxy injects the X-Auth-Token header so the browser never needs to know the key
+app.use("/judge0", createProxyMiddleware({
+  target: "http://35.153.133.130:2358",
+  changeOrigin: true,
+  pathRewrite: { "^/judge0": "" },
+  on: {
+    proxyReq: (proxyReq) => {
+      proxyReq.setHeader("X-Auth-Token", JUDGE0_AUTH_TOKEN);
+    }
+  }
+}));
 
 // Enable JSON parsing
 app.use(express.json({ limit: "10kb" }));
@@ -85,13 +102,7 @@ app.post("/ssh-sign-out", (req, res) => {
   }
 });
 
-// HTTPS options (key + cert in same folder as ssh-bridge.js)
-const httpsOptions = {
-  key: fs.readFileSync(path.join(__dirname, "server.key")),
-  cert: fs.readFileSync(path.join(__dirname, "server.cert")),
-};
-
-// Start HTTPS server on port 4000
-https.createServer(httpsOptions, app).listen(4000, "0.0.0.0", () => {
-  console.log("Server running on https://localhost:4000");
+// Start HTTP server on port 80
+http.createServer(app).listen(3000, "127.0.0.1", () => {
+  console.log("Server running on http://localhost:3000");
 });
