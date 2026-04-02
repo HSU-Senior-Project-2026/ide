@@ -2,6 +2,7 @@ html, body {
     margin: 0;
     padding: 0;
     height: 100%;
+    overflow-x: hidden;
 }
 
 .judge0-file-menu {
@@ -23,6 +24,8 @@ html, body {
     flex-grow: 1;
     overflow-y: auto;
     padding: 0.5rem;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 #judge0-chat-messages pre {
@@ -46,11 +49,16 @@ html, body {
     margin-top: 1em !important;
     max-width: 66%;
     overflow-wrap: break-word;
-    width: fit-content;
+    width: auto;
 }
 
 #judge0-chat-input-container {
     margin-top: 0;
+    width: 100%;
+    max-width:100%;
+    min-height: 40px;
+    box-sizing: border-box;
+    resize: vertical;
 }
 
 #judge0-status-line:empty {
@@ -85,5 +93,8 @@ html, body {
     #judge0-chat-messages {
         padding: 0.25rem;
     }
-}
 
+    #judge0-chat-messages pre {
+        font-size: 0.85rem;
+    }
+}
