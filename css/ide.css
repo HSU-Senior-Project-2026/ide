@@ -35,10 +35,10 @@ html, body {
     gap:10px;
 }
 
-/* Compact action buttons */
+/* Action buttons */
 .item.judge0-showRunButton {
     display: flex;
-    gap: 0;
+    gap: 8px;
 }
 
 .item.judge0-showRunButton .ui.button {
@@ -46,8 +46,14 @@ html, body {
     padding: 0.6em 0.9em !important;
 }
 
-.item.judge0-showRunButton #clear-btn {
-    padding: 0.6em 0.7em !important;
+/* Terminal button */
+.terminal-btn {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-weight: 700 !important;
+}
+
+.terminal-btn .terminal-label {
+    font-size: 14px;
 }
 
 /* Account dropdown */
@@ -84,6 +90,249 @@ html, body {
 .judge0-hidden, .judge0-style-hidden {
     display: none !important;
 }
+
+/* ===== Site Wrapper: activity bar + sidebar + editor ===== */
+#judge0-site-wrapper {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+/* ===== Activity Bar (VS Code icon strip) ===== */
+#judge0-activity-bar {
+    width: 48px;
+    min-width: 48px;
+    background: #252526;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 4px;
+    border-right: 1px solid #1e1e1e;
+    z-index: 100;
+}
+
+.activity-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #858585;
+    border-left: 2px solid transparent;
+    transition: color 0.15s;
+}
+
+.activity-icon:hover {
+    color: #d4d4d4;
+}
+
+.activity-icon.active {
+    color: #ffffff;
+    border-left-color: #ffffff;
+}
+
+/* ===== File Explorer Sidebar ===== */
+#judge0-sidebar {
+    width: 240px;
+    min-width: 180px;
+    max-width: 400px;
+    background: #252526;
+    border-right: 1px solid #1e1e1e;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 99;
+    transition: width 0.15s ease;
+}
+
+#judge0-sidebar.collapsed {
+    width: 0;
+    min-width: 0;
+    border-right: none;
+}
+
+#sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    height: 35px;
+    min-height: 35px;
+    user-select: none;
+}
+
+.sidebar-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: #bbbbbb;
+    text-transform: uppercase;
+}
+
+.sidebar-actions {
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+#sidebar-header:hover .sidebar-actions {
+    opacity: 1;
+}
+
+.sidebar-action-btn {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sidebar-action-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #d4d4d4;
+}
+
+/* ===== File Tree ===== */
+#sidebar-tree {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 8px;
+}
+
+#sidebar-tree::-webkit-scrollbar {
+    width: 6px;
+}
+
+#sidebar-tree::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+}
+
+.sidebar-placeholder {
+    color: #858585;
+    font-size: 12px;
+    padding: 16px 20px;
+    text-align: center;
+}
+
+.tree-item {
+    display: flex;
+    align-items: center;
+    height: 22px;
+    padding-right: 8px;
+    cursor: pointer;
+    color: #cccccc;
+    font-size: 13px;
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.tree-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.tree-item.selected {
+    background: #094771;
+}
+
+.tree-item.selected:hover {
+    background: #094771;
+}
+
+.tree-item-indent {
+    display: inline-block;
+    width: 16px;
+    min-width: 16px;
+}
+
+.tree-item-arrow {
+    width: 16px;
+    min-width: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: #858585;
+    transition: transform 0.1s;
+}
+
+.tree-item-arrow.open {
+    transform: rotate(90deg);
+}
+
+.tree-item-arrow.hidden {
+    visibility: hidden;
+}
+
+.tree-item-icon {
+    width: 16px;
+    min-width: 16px;
+    margin-right: 4px;
+    text-align: center;
+    font-size: 14px;
+}
+
+.tree-item-icon.folder {
+    color: #dcb67a;
+}
+
+.tree-item-icon.file-java { color: #e76f00; }
+.tree-item-icon.file-py   { color: #3572a5; }
+.tree-item-icon.file-c    { color: #555599; }
+.tree-item-icon.file-js   { color: #f7df1e; }
+.tree-item-icon.file-txt  { color: #858585; }
+.tree-item-icon.file-default { color: #858585; }
+
+.tree-item-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tree-children {
+    display: none;
+}
+
+.tree-children.open {
+    display: block;
+}
+
+/* ===== Editor area fills remaining space ===== */
+#judge0-site-content {
+    flex: 1;
+    min-width: 0;
+}
+
+/* ===== Light theme overrides ===== */
+body.light-theme #judge0-activity-bar,
+body.light-theme #judge0-sidebar {
+    background: #f3f3f3;
+    border-right-color: #e0e0e0;
+}
+
+body.light-theme .activity-icon { color: #616161; }
+body.light-theme .activity-icon:hover { color: #333333; }
+body.light-theme .activity-icon.active { color: #333333; border-left-color: #333333; }
+
+body.light-theme .sidebar-title { color: #6f6f6f; }
+body.light-theme .sidebar-action-btn { color: #616161; }
+body.light-theme .sidebar-action-btn:hover { background: rgba(0, 0, 0, 0.06); color: #333333; }
+
+body.light-theme .tree-item { color: #333333; }
+body.light-theme .tree-item:hover { background: rgba(0, 0, 0, 0.04); }
+body.light-theme .tree-item.selected { background: #0060c0; color: #ffffff; }
+body.light-theme .tree-item-arrow { color: #616161; }
+body.light-theme .sidebar-placeholder { color: #999999; }
 
 /* Editor toolbar */
 .judge0-editorToolbar {

@@ -129,24 +129,15 @@
                 <input id="compiler-options" type="text" placeholder="Compiler options"></input>
             </div>
         </div> -->
-        <div class="item judge0-showCommandLineArguments">
-            <div class="ui left icon transparent input">
-                <i class="terminal icon"></i>
-                <input id="command-line-arguments" type="text" placeholder="Command line arguments"></input>
-            </div>
-        </div>
         <div class="item judge0-showRunButton">
-
             <button id="compile-btn" class="ui button">
                  Compile Code
             </button>
-            <button id="run-btn" class="ui primary labeled icon button" data-content="+↵">
-                <i class="play icon"></i>
-                Run Code
+            <button id="run-btn" class="ui primary button" data-content="+↵">
+                <i class="play icon"></i> Run
             </button>
-            <button id="clear-btn" class="ui primary labeled icon button" data-content="+↵" >
-                <i class="trash icon"></i>
-                Clear
+            <button id="terminal-btn" class="ui basic icon button terminal-btn" title="Terminal">
+                <span class="terminal-label">&gt;_</span>
             </button>
         </div>
         <div class="right menu">
@@ -183,7 +174,41 @@
         </div>
     </div>
 
-    <div id="judge0-site-content"></div>
+    <div id="judge0-site-wrapper">
+        <!--Activity Bar (icon strip)-->
+        <div id="judge0-activity-bar">
+            <div class="activity-icon active" data-panel="explorer" title="Explorer">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2"/>
+                    <rect x="3" y="7" width="18" height="14" rx="2"/>
+                </svg>
+            </div>
+        </div>
+
+        <!--File Explorer Sidebar-->
+        <div id="judge0-sidebar">
+            <div id="sidebar-header">
+                <span class="sidebar-title">EXPLORER</span>
+                <div class="sidebar-actions">
+                    <button id="sidebar-new-file" class="sidebar-action-btn" title="New File">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+                    </button>
+                    <button id="sidebar-refresh" class="sidebar-action-btn" title="Refresh">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    </button>
+                    <button id="sidebar-collapse" class="sidebar-action-btn" title="Collapse All">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div id="sidebar-tree">
+                <div class="sidebar-placeholder">Sign in to browse files</div>
+            </div>
+        </div>
+
+        <!--Editor / Golden Layout area-->
+        <div id="judge0-site-content"></div>
+    </div>
 
     <!--New File Modal-->
     <div id="judge0-new-file-modal" class="ui small modal">

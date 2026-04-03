@@ -1,5 +1,6 @@
 import { usePuter } from "./puter.js";
 import configuration from "./configuration.js";
+import { FileManager } from "./file_explorer.js";
 
 // API key and auth are handled server-side by the ssh-bridge proxy — not needed here
 const AUTH_HEADERS = {};
@@ -582,6 +583,7 @@ function saveNow(reason) {
 
   // MVP: save to localStorage (silent autosave)
   localStorage.setItem("autosave:" + currentFileName, content);
+  FileManager.saveActiveFile(content);
 
   isSaving = false;
   hasUnsavedChanges = false;
@@ -641,9 +643,9 @@ function setFontSizeForAllEditors(fontSize) {
 }
 
 async function loadLangauges() {
-    // Only allow Java (CE, 91), C (CE, 103), and Python (EXTRA_CE, 25)
-    var ALLOWED_CE_LANGUAGES = [91, 103];        // Java, C
-    var ALLOWED_EXTRA_CE_LANGUAGES = [25];        // Python
+    // Only allow Java, C, and Python from available backend languages
+    var ALLOWED_CE_LANGUAGES = [62, 50, 71];     // Java (OpenJDK 13.0.1), C (GCC 9.2.0), Python (3.8.1)
+    var ALLOWED_EXTRA_CE_LANGUAGES = [];
 
     return new Promise((resolve, reject) => {
         let options = [];
@@ -702,7 +704,7 @@ async function loadLangauges() {
 };
 
 // Languages that are interpreted and do not need a separate compile step
-const INTERPRETED_LANGUAGE_IDS = [25]; // Python
+const INTERPRETED_LANGUAGE_IDS = [71]; // Python (3.8.1)
 
 function updateCompileButtonVisibility() {
     let languageId = getSelectedLanguageId();
@@ -763,9 +765,14 @@ async function getLanguage(flavor, languageId) {
 function setDefaults() {
     setFontSizeForAllEditors(fontSize);
 
-    // Restore source code from localStorage, or use default
-    var savedSource = localStorage.getItem("judge0.sourceCode");
-    sourceEditor.setValue(savedSource !== null ? savedSource : DEFAULT_SOURCE);
+    let initialFile = FileManager.getInitialFileContent();
+    if (initialFile) {
+        sourceEditor.setValue(initialFile.content);
+        // setSourceCodeName(initialFile.name); // This happens in openFile logic when clicked as well
+    } else {
+        sourceEditor.setValue(DEFAULT_SOURCE);
+        // setSourceCodeName("Main.java");
+    }
 
     stdinEditor.setValue(DEFAULT_STDIN);
     $compilerOptions.val(DEFAULT_COMPILER_OPTIONS);
@@ -791,9 +798,11 @@ function clear() {
 function refreshSiteContentHeight() {
     const navigationHeight = document.getElementById("judge0-site-navigation").offsetHeight;
 
+    const wrapper = document.getElementById("judge0-site-wrapper");
+    wrapper.style.top = `${navigationHeight}px`;
+
     const siteContent = document.getElementById("judge0-site-content");
-    siteContent.style.height = `${window.innerHeight}px`;
-    siteContent.style.paddingTop = `${navigationHeight}px`;
+    siteContent.style.height = `${window.innerHeight - navigationHeight}px`;
 }
 
 function refreshLayoutSize() {
@@ -977,6 +986,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
                 // Persist source code to localStorage
                 try { localStorage.setItem("judge0.sourceCode", sourceEditor.getValue()); } catch (e) {}
+                try { FileManager.saveActiveFile(sourceEditor.getValue()); } catch (e) {}
             });
 
              // After initial editor setup/content load finishes, mark file as clean and enable dirty tracking
@@ -1147,6 +1157,11 @@ document.addEventListener("DOMContentLoaded", async function () {
         });
 
         layout.on("initialised", function () {
+            FileManager.init({
+                onOpenFile: (content, name) => {
+                    openFile(content, name);
+                }
+            });
             setDefaults();
             refreshLayoutSize();
             // Apply saved font size and word wrap after editors exist
@@ -1247,7 +1262,7 @@ document.addEventListener("DOMContentLoaded", async function () {
             alert("Please enter a filename.");
             return;
         }
-        newFile(filename);
+        FileManager.createFile(filename);
         $("#judge0-new-file-modal").modal("hide");
     });
     document.getElementById("judge0-new-file-cancel-btn").addEventListener("click", function () {
@@ -1257,6 +1272,28 @@ document.addEventListener("DOMContentLoaded", async function () {
     document.getElementById("judge0-new-file-form").addEventListener("submit", function (e) {
         e.preventDefault();
         document.getElementById("judge0-new-file-create-btn").click();
+    });
+
+    // Activity bar: toggle sidebar
+    document.querySelectorAll(".activity-icon").forEach(function (icon) {
+        icon.addEventListener("click", function () {
+            var panel = this.getAttribute("data-panel");
+            var sidebar = document.getElementById("judge0-sidebar");
+
+            if (this.classList.contains("active")) {
+                // Collapse sidebar
+                this.classList.remove("active");
+                sidebar.classList.add("collapsed");
+            } else {
+                // Expand sidebar
+                document.querySelectorAll(".activity-icon").forEach(function (i) { i.classList.remove("active"); });
+                this.classList.add("active");
+                sidebar.classList.remove("collapsed");
+            }
+
+            // Give Golden Layout time to notice the resize
+            setTimeout(function () { refreshLayoutSize(); }, 200);
+        });
     });
 
     window.onmessage = function (e) {
@@ -1315,7 +1352,7 @@ const DEFAULT_STDIN = "";
 
 const DEFAULT_COMPILER_OPTIONS = "";
 const DEFAULT_CMD_ARGUMENTS = "";
-const DEFAULT_LANGUAGE_ID = 91; // Java (JDK 17.0.6) (https://ce.judge0.com/languages/91)
+const DEFAULT_LANGUAGE_ID = 62; // Java (OpenJDK 13.0.1)
 
 function getEditorLanguageMode(languageName) {
     const DEFAULT_EDITOR_LANGUAGE_MODE = "plaintext";
@@ -1353,24 +1390,9 @@ function getEditorLanguageMode(languageName) {
 }
 
 const EXTENSIONS_TABLE = {
-    "asm": { "flavor": CE, "language_id": 45 }, // Assembly (NASM 2.14.02)
-    "c": { "flavor": CE, "language_id": 103 }, // C (GCC 14.1.0)
-    "cpp": { "flavor": CE, "language_id": 105 }, // C++ (GCC 14.1.0)
-    "cs": { "flavor": EXTRA_CE, "language_id": 29 }, // C# (.NET Core SDK 7.0.400)
-    "go": { "flavor": CE, "language_id": 95 }, // Go (1.18.5)
-    "java": { "flavor": CE, "language_id": 91 }, // Java (JDK 17.0.6)
-    "js": { "flavor": CE, "language_id": 102 }, // JavaScript (Node.js 22.08.0)
-    "lua": { "flavor": CE, "language_id": 64 }, // Lua (5.3.5)
-    "pas": { "flavor": CE, "language_id": 67 }, // Pascal (FPC 3.0.4)
-    "php": { "flavor": CE, "language_id": 98 }, // PHP (8.3.11)
-    "py": { "flavor": EXTRA_CE, "language_id": 25 }, // Python for ML (3.11.2)
-    "r": { "flavor": CE, "language_id": 99 }, // R (4.4.1)
-    "rb": { "flavor": CE, "language_id": 72 }, // Ruby (2.7.0)
-    "rs": { "flavor": CE, "language_id": 73 }, // Rust (1.40.0)
-    "scala": { "flavor": CE, "language_id": 81 }, // Scala (2.13.2)
-    "sh": { "flavor": CE, "language_id": 46 }, // Bash (5.0.0)
-    "swift": { "flavor": CE, "language_id": 83 }, // Swift (5.2.3)
-    "ts": { "flavor": CE, "language_id": 101 }, // TypeScript (5.6.2)
+    "java": { "flavor": CE, "language_id": 62 }, // Java (OpenJDK 13.0.1)
+    "c": { "flavor": CE, "language_id": 50 }, // C (GCC 9.2.0)
+    "py": { "flavor": CE, "language_id": 71 }, // Python (3.8.1)
     "txt": { "flavor": CE, "language_id": 43 }, // Plain Text
 };
 
