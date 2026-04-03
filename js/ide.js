@@ -117,13 +117,11 @@ var layoutConfig = {
                     } : null,
                     configuration.get("appOptions.showOutput") ? {
                         type: "component",
-                        componentName: "runOut",
-                        id: "runOut",
-                        title: "Runtime",
+                        componentName: "terminal",
+                        id: "terminal",
+                        title: "Terminal",
                         isClosable: false,
-                        componentState: {
-                            readOnly: true
-                        }
+                        componentState: {}
                     } : null].filter(Boolean)
             }].filter(Boolean)
         }]
@@ -950,8 +948,55 @@ document.addEventListener("DOMContentLoaded", async function () {
                 scrollBeyondLastLine: false,
                 readOnly: true,
                 language: "plaintext",
-                minimap: { enabled: false 
+                minimap: { enabled: false
                 }
+            });
+        });
+
+        layout.registerComponent("terminal", function (container) {
+            // Create a div that fills the entire golden-layout panel.
+            // xterm.js renders its canvas inside this div.
+            const termDiv = document.createElement("div");
+            termDiv.style.width = "100%";
+            termDiv.style.height = "100%";
+            termDiv.style.overflow = "hidden";
+            termDiv.style.backgroundColor = "#1e1e1e";
+            container.getElement()[0].appendChild(termDiv);
+
+            // Create the xterm.js terminal instance.
+            // convertEol: true  → treats \n from the server as \r\n so lines don't
+            //                     staircase down the screen without returning to the left.
+            // scrollback: 1000  → remembers up to 1000 lines above the visible area.
+            // fontFamily        → matches the JetBrains Mono font already used in the editor.
+            const term = new Terminal({
+                convertEol: true,
+                scrollback: 1000,
+                fontSize: 13,
+                fontFamily: "JetBrains Mono, monospace",
+                theme: {
+                    background: "#1e1e1e",
+                    foreground: "#d4d4d4"
+                }
+            });
+
+            term.open(termDiv);
+
+            // Static placeholder text so we can confirm the terminal is rendering
+            // correctly before wiring it to the WebSocket in the next step.
+            term.write("Terminal ready.\r\n");
+            term.write("Sign in to the CSCI server and click Run to begin.\r\n");
+
+            // Store the terminal instance on window so run() can reach it later.
+            // window is the global object in the browser — anything attached to it
+            // is accessible from any other script on the page.
+            window.sshTerminal = term;
+
+            // When the golden-layout panel is resized, resize the terminal to match.
+            // Without this, the terminal stays its original size even if the panel grows.
+            container.on("resize", function () {
+                const cols = Math.max(10, Math.floor(container.width / 8));
+                const rows = Math.max(5, Math.floor(container.height / 17));
+                try { term.resize(cols, rows); } catch (e) { /* ignore during init */ }
             });
         });
 
