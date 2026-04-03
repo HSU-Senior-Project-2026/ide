@@ -124,11 +124,30 @@ app.post("/ssh-sign-out", (req, res) => {
 // CSCI server. compile: null means the language is interpreted — no compile
 // step needed, we just write the file and mark it ready to run immediately.
 const LANGUAGE_COMMANDS = {
+    // Java — Judge0 lists Java under several IDs depending on the JDK version.
+    // All of them compile and run identically on the CSCI server.
+    62:  { file: "Main.java",  compile: "javac Main.java",       run: "java -cp . Main"  },
     91:  { file: "Main.java",  compile: "javac Main.java",       run: "java -cp . Main"  },
+    27:  { file: "Main.java",  compile: "javac Main.java",       run: "java -cp . Main"  },
+
+    // C
     103: { file: "main.c",     compile: "gcc main.c -o main",    run: "./main"           },
+    4:   { file: "main.c",     compile: "gcc main.c -o main",    run: "./main"           },
+
+    // C++
     105: { file: "main.cpp",   compile: "g++ main.cpp -o main",  run: "./main"           },
+    10:  { file: "main.cpp",   compile: "g++ main.cpp -o main",  run: "./main"           },
+
+    // Python — no compile step needed
     25:  { file: "main.py",    compile: null,                    run: "python3 main.py"  },
+    70:  { file: "main.py",    compile: null,                    run: "python3 main.py"  },
+    71:  { file: "main.py",    compile: null,                    run: "python3 main.py"  },
+
+    // JavaScript (Node.js)
     102: { file: "main.js",    compile: null,                    run: "node main.js"     },
+    63:  { file: "main.js",    compile: null,                    run: "node main.js"     },
+
+    // Bash
     46:  { file: "main.sh",    compile: null,                    run: "bash main.sh"     },
 };
 
