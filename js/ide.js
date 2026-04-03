@@ -1,4 +1,3 @@
-import { usePuter } from "./puter.js";
 import configuration from "./configuration.js";
 import { FileManager } from "./file_explorer.js";
 
@@ -136,17 +135,7 @@ var layoutConfig = {
         }, {
             type: configuration.get("appOptions.assistantLayout"),
             title: "AI Assistant and I/O",
-            content: [configuration.get("appOptions.showAIAssistant") ? {
-                type: "component",
-                height: 66,
-                componentName: "ai",
-                id: "ai",
-                title: "AI Assistant",
-                isClosable: false,
-                componentState: {
-                    readOnly: false
-                }
-            } : null, {
+            content: [{
                 type: configuration.get("appOptions.ioLayout"),
                 title: "I/O",
                 content: [
@@ -184,7 +173,7 @@ var layoutConfig = {
     }]
 };
 
-var gPuterFile;
+
 
 function encode(str) {
     return btoa(unescape(encodeURIComponent(str || "")));
@@ -613,25 +602,11 @@ function saveFile(content, filename) {
 }
 
 async function openAction() {
-    if (usePuter()) {
-        gPuterFile = await puter.ui.showOpenFilePicker();
-        openFile(await (await gPuterFile.read()).text(), gPuterFile.name);
-    } else {
-        document.getElementById("open-file-input").click();
-    }
+    document.getElementById("open-file-input").click();
 }
 
 async function saveAction() {
-    if (usePuter()) {
-        if (gPuterFile) {
-            gPuterFile.write(sourceEditor.getValue());
-        } else {
-            gPuterFile = await puter.ui.showSaveFilePicker(sourceEditor.getValue(), currentFileName);
-            setSourceCodeName(gPuterFile.name);
-        }
-    } else {
-        saveFile(sourceEditor.getValue(), currentFileName);
-    }
+    saveFile(sourceEditor.getValue(), currentFileName);
 }
 
 function setFontSizeForAllEditors(fontSize) {
@@ -1152,9 +1127,7 @@ document.addEventListener("DOMContentLoaded", async function () {
             });
         });
 
-        layout.registerComponent("ai", function (container, state) {
-            container.getElement()[0].appendChild(document.getElementById("judge0-chat-container"));
-        });
+
 
         layout.on("initialised", function () {
             FileManager.init({
