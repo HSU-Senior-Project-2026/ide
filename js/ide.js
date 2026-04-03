@@ -857,7 +857,7 @@ document.addEventListener("DOMContentLoaded", async function () {
             switch (e.key.toLowerCase()) {
                 case "n":
                     e.preventDefault();
-                    document.getElementById("judge0-new-file-btn").click();
+                    document.getElementById("sidebar-new-file")?.click();
                     return;
                 case "o":
                     e.preventDefault();
@@ -865,7 +865,9 @@ document.addEventListener("DOMContentLoaded", async function () {
                     return;
                 case "d":
                     e.preventDefault();
-                    document.getElementById("judge0-download-btn").click();
+                    if (sourceEditor) {
+                        saveFile(sourceEditor.getValue(), currentFileName);
+                    }
                     return;
             }
         }
@@ -1162,9 +1164,9 @@ document.addEventListener("DOMContentLoaded", async function () {
         btn.attr("data-content", `${superKey}${btn.attr("data-content")}`);
     });
 
-    document.getElementById("judge0-open-file-btn").addEventListener("click", openAction);
-    document.getElementById("judge0-save-btn").addEventListener("click", saveAction);
-    document.getElementById("judge0-download-btn").addEventListener("click", function () {
+    document.getElementById("judge0-open-file-btn")?.addEventListener("click", openAction);
+    document.getElementById("judge0-save-btn")?.addEventListener("click", saveAction);
+    document.getElementById("judge0-download-btn")?.addEventListener("click", function () {
         if (sourceEditor) {
             saveFile(sourceEditor.getValue(), currentFileName);
         }
@@ -1220,7 +1222,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     });
 
     // New File modal handlers
-    document.getElementById("judge0-new-file-btn").addEventListener("click", function () {
+    document.getElementById("judge0-new-file-btn")?.addEventListener("click", function () {
         $("#new-file-name").val("");
         $("#judge0-new-file-modal").modal({ closable: true }).modal("show");
         setTimeout(function () { document.getElementById("new-file-name").focus(); }, 100);

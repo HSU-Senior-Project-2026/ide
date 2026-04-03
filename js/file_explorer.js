@@ -173,15 +173,48 @@ export const FileManager = {
                 
                 renameEl.onclick = (e) => {
                     e.stopPropagation();
-                    const newName = prompt("Enter new name:", node.name);
-                    if (newName && newName.trim() !== "" && newName !== node.name) {
-                        node.name = newName.trim();
-                        this.saveWorkspace();
-                        this.render();
-                        if (this.callbacks.onRenameFile && node.id === this.activeFileId) {
-                            this.callbacks.onRenameFile(node.name);
+                    const inputEl = document.createElement("input");
+                    inputEl.type = "text";
+                    inputEl.value = node.name;
+                    inputEl.className = "tree-item-rename-input";
+                    inputEl.style.flex = "1";
+                    inputEl.style.minWidth = "0";
+                    inputEl.style.background = "var(--input-bg, rgba(0,0,0,0.1))";
+                    inputEl.style.border = "1px solid #0060c0";
+                    inputEl.style.color = "inherit";
+                    inputEl.style.outline = "none";
+                    inputEl.style.padding = "0 2px";
+                    
+                    const saveRename = () => {
+                        const newName = inputEl.value;
+                        if (newName && newName.trim() !== "" && newName !== node.name) {
+                            node.name = newName.trim();
+                            this.saveWorkspace();
+                            if (this.callbacks.onRenameFile && node.id === this.activeFileId) {
+                                this.callbacks.onRenameFile(node.name);
+                            }
                         }
-                    }
+                        this.render();
+                    };
+                    
+                    inputEl.onblur = saveRename;
+                    inputEl.onkeydown = (e) => {
+                        if (e.key === "Enter") {
+                            inputEl.blur();
+                        } else if (e.key === "Escape") {
+                            inputEl.value = node.name;
+                            inputEl.blur();
+                        }
+                    };
+                    
+                    // Hide rename icon while editing
+                    renameEl.style.display = "none";
+                    el.onmouseenter = null;
+                    el.onmouseleave = null;
+                    
+                    el.replaceChild(inputEl, nameEl);
+                    inputEl.focus();
+                    inputEl.select();
                 };
 
                 el.onmouseenter = () => renameEl.style.display = "block";
