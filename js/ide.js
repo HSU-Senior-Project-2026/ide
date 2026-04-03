@@ -1241,6 +1241,29 @@ document.addEventListener("DOMContentLoaded", async function () {
     document.getElementById("judge0-new-file-cancel-btn").addEventListener("click", function () {
         $("#judge0-new-file-modal").modal("hide");
     });
+
+    // Handle new file from sidebar
+    var sidebarNewFileBtn = document.getElementById("sidebar-new-file");
+    if (sidebarNewFileBtn) {
+        sidebarNewFileBtn.addEventListener("click", function () {
+            $("#new-file-name").val("");
+            $("#judge0-new-file-modal").modal("show");
+        });
+    }
+
+    // Handle explicit close button from sidebar
+    var sidebarCloseBtn = document.getElementById("sidebar-close");
+    if (sidebarCloseBtn) {
+        sidebarCloseBtn.addEventListener("click", function() {
+            var explorerIcon = document.querySelector('.activity-icon[data-panel="explorer"]');
+            var sidebar = document.getElementById("judge0-sidebar");
+            
+            if (explorerIcon) explorerIcon.classList.remove("active");
+            if (sidebar) sidebar.classList.add("collapsed");
+            
+            setTimeout(function () { refreshLayoutSize(); }, 200);
+        });
+    }
     // Allow pressing Enter to create the file
     document.getElementById("judge0-new-file-form").addEventListener("submit", function (e) {
         e.preventDefault();
