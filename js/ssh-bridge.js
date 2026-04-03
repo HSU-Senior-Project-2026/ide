@@ -295,7 +295,13 @@ wss.on("connection", (ws, req) => {
       //   ulimit -t 10 — 10 seconds CPU time limit
       //   ulimit -v    — 512MB virtual memory limit (in KB)
       // This protects the server if a student accidentally writes an infinite loop.
-      const runCmd = `cd ${tmpDir} && timeout 30 bash -c "ulimit -t 10 -v 524288; ${lang.run}"`;
+      // timeout 30  — kills the process after 30 seconds wall-clock time
+      // ulimit -t 10 — 10 seconds CPU time; catches infinite loops
+      // ulimit -v was removed: Java needs several hundred MB of virtual address
+      // space just to initialize the JVM, so a virtual memory cap causes the
+      // VM to fail before the student's code ever runs. The server has 62GB RAM
+      // so memory is not a meaningful concern for this workload.
+      const runCmd = `cd ${tmpDir} && timeout 30 bash -c "ulimit -t 10; ${lang.run}"`;
 
       console.log(`[RUN] user=${username} dir=${tmpDir}`);
 
