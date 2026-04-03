@@ -159,10 +159,38 @@ export const FileManager = {
                 const nameEl = document.createElement("div");
                 nameEl.className = "tree-item-name";
                 nameEl.textContent = node.name;
+                nameEl.style.flex = "1";
+                nameEl.style.overflow = "hidden";
+                nameEl.style.textOverflow = "ellipsis";
+                
+                const renameEl = document.createElement("div");
+                renameEl.className = "tree-item-action";
+                renameEl.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`;
+                renameEl.style.display = "none";
+                renameEl.style.marginLeft = "auto";
+                renameEl.style.paddingLeft = "4px";
+                renameEl.title = "Rename";
+                
+                renameEl.onclick = (e) => {
+                    e.stopPropagation();
+                    const newName = prompt("Enter new name:", node.name);
+                    if (newName && newName.trim() !== "" && newName !== node.name) {
+                        node.name = newName.trim();
+                        this.saveWorkspace();
+                        this.render();
+                        if (this.callbacks.onRenameFile && node.id === this.activeFileId) {
+                            this.callbacks.onRenameFile(node.name);
+                        }
+                    }
+                };
+
+                el.onmouseenter = () => renameEl.style.display = "block";
+                el.onmouseleave = () => renameEl.style.display = "none";
                 
                 el.appendChild(arrowEl);
                 el.appendChild(iconEl);
                 el.appendChild(nameEl);
+                el.appendChild(renameEl);
                 
                 el.onclick = (e) => {
                     e.stopPropagation();

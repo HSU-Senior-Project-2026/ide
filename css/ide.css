@@ -150,9 +150,10 @@ html, body {
 }
 
 #judge0-sidebar.collapsed {
-    width: 0;
-    min-width: 0;
+    width: 0 !important;
+    min-width: 0 !important;
     border-right: none;
+    display: none !important;
 }
 
 #sidebar-header {

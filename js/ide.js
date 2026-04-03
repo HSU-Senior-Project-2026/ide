@@ -1133,6 +1133,9 @@ document.addEventListener("DOMContentLoaded", async function () {
             FileManager.init({
                 onOpenFile: (content, name) => {
                     openFile(content, name);
+                },
+                onRenameFile: (name) => {
+                    setSourceCodeName(name);
                 }
             });
             setDefaults();
@@ -1158,13 +1161,6 @@ document.addEventListener("DOMContentLoaded", async function () {
     [$runBtn].forEach(btn => {
         btn.attr("data-content", `${superKey}${btn.attr("data-content")}`);
     });
-
-    if (usePuter()) {
-        puter.ui.onLaunchedWithItems(async function (items) {
-            gPuterFile = items[0];
-            openFile(await (await gPuterFile.read()).text(), gPuterFile.name);
-        });
-    }
 
     document.getElementById("judge0-open-file-btn").addEventListener("click", openAction);
     document.getElementById("judge0-save-btn").addEventListener("click", saveAction);
