@@ -56,6 +56,10 @@ var $statusLine;
 var $compileBtn;
 var lastCompiledCode=null;
 
+// Tracks the currently open WebSocket to the ssh-bridge terminal endpoint.
+// Kept here so we can close it before opening a new one when Run is clicked again.
+var activeTerminalWS = null;
+
 
 var timeStart;
 
@@ -333,96 +337,92 @@ function updateRunButtonState() {
 }
 
 function run() {
-    const currentCode = sourceEditor.getValue().trim();
+    // Gate 1: student must be signed in to the CSCI server.
+    // window.csciSessionToken is set by csci.js after a successful sign-in.
+    const token = window.csciSessionToken;
+    if (!token) {
+        if (window.sshTerminal) {
+            window.sshTerminal.write("\r\nERROR: Not signed in. Please sign in to the CSCI server first.\r\n");
+        }
+        return;
+    }
 
+    // Gate 2: code must have been compiled successfully before running.
+    const currentCode = sourceEditor.getValue().trim();
     if (!lastCompiledCode || currentCode !== lastCompiledCode) {
         updateRunButtonState();
         return;
     }
 
-    $runBtn.addClass("loading"); 
+    $runBtn.addClass("loading");
+    $statusLine.html("Connecting...");
 
-    //stdoutEditor.setValue("");
-    if (compileOutEditor) compileOutEditor.setValue("");
-    if (runOutEditor) runOutEditor.setValue("");
-    $statusLine.html("");
-
-    /*let x = layout.root.getItemsById("runOut")[0];
-    x.parent.header.parent.setActiveContentItem(x);*/
-
-    const runtimeTab = layout.root.getItemsById("runOut")[0];
-    if (runtimeTab && runtimeTab.parent && runtimeTab.parent.header && runtimeTab.parent.header.parent) {
-        runtimeTab.parent.header.parent.setActiveContentItem(runtimeTab);
+    // Switch the visible panel to the terminal tab so the student sees output.
+    const termTab = layout.root.getItemsById("terminal")[0];
+    if (termTab && termTab.parent && termTab.parent.header && termTab.parent.header.parent) {
+        termTab.parent.header.parent.setActiveContentItem(termTab);
     }
 
-    let sourceValue = encode(sourceEditor.getValue());
-    let stdinValue = encode(stdinEditor.getValue());
-    let languageId = getSelectedLanguageId();
-    let compilerOptions = $compilerOptions.val();
-    let commandLineArguments = $commandLineArguments.val();
-
-    let flavor = getSelectedLanguageFlavor();
-
-    if (languageId === 44) {
-        sourceValue = sourceEditor.getValue();
+    const term = window.sshTerminal;
+    if (!term) {
+        $runBtn.removeClass("loading");
+        return;
     }
 
-    let data = {
-        source_code: sourceValue,
-        language_id: languageId,
-        stdin: stdinValue,
-        compiler_options: compilerOptions,
-        command_line_arguments: commandLineArguments,
-        redirect_stderr_to_stdout: true
+    // Close any WebSocket still open from a previous run before starting a new one.
+    if (activeTerminalWS) {
+        activeTerminalWS.close();
+        activeTerminalWS = null;
+    }
+
+    term.clear();
+
+    // Build the WebSocket URL. We use window.location.host so this works regardless
+    // of whether the IDE is on localhost, a LAN IP, or a public domain.
+    // ws:// is plain WebSocket (matching our http:// server). wss:// would be used
+    // if the server were running over https://.
+    const languageId = getSelectedLanguageId();
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=run&lang=${languageId}`;
+
+    const ws = new WebSocket(wsUrl);
+    activeTerminalWS = ws;
+
+    // Wire 1: server → terminal.
+    // Whenever ssh-bridge sends data (program output, error messages, echo text),
+    // write it directly into the xterm.js terminal for the student to see.
+    ws.onmessage = (event) => {
+        term.write(event.data);
     };
 
-    let sendRequest = function (data) {
-        window.top.postMessage(JSON.parse(JSON.stringify({
-            event: "preExecution",
-            source_code: sourceEditor.getValue(),
-            language_id: languageId,
-            flavor: flavor,
-            stdin: stdinEditor.getValue(),
-            compiler_options: compilerOptions,
-            command_line_arguments: commandLineArguments
-        })), "*");
-
-        timeStart = performance.now();
-        $.ajax({
-            url: `${AUTHENTICATED_BASE_URL[flavor]}/submissions?base64_encoded=true&wait=false`,
-            type: "POST",
-            contentType: "application/json",
-            data: JSON.stringify(data),
-            headers: AUTH_HEADERS,
-            success: function (data, textStatus, request) {
-                console.log(`Your submission token is: ${data.token}`);
-                let region = request.getResponseHeader('X-Judge0-Region');
-                setTimeout(fetchSubmission.bind(null, flavor, region, data.token, 1), INITIAL_WAIT_TIME_MS);
-            },
-            error: handleRunError
-        });
-    }
-
-    if (languageId === 82) {
-        if (!sqliteAdditionalFiles) {
-            $.ajax({
-                url: `./data/additional_files_zip_base64.txt`,
-                contentType: "text/plain",
-                success: function (responseData) {
-                    sqliteAdditionalFiles = responseData;
-                    data["additional_files"] = sqliteAdditionalFiles;
-                    sendRequest(data);
-                },
-                error: handleRunError
-            });
+    // Wire 2: terminal keystrokes → server.
+    // term.onData fires for every character the student types, including special
+    // keys like backspace, arrow keys, and Enter. We forward each character to
+    // ssh-bridge, which passes it to the running program's stdin.
+    // onData returns a disposable — calling dispose() stops listening, which we
+    // do when the connection closes to avoid attaching duplicate listeners.
+    const dataDisposable = term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(data);
         }
-        else {
-            data["additional_files"] = sqliteAdditionalFiles;
-            sendRequest(data);
-        }
-    } else {
-        sendRequest(data);
-    }
+    });
+
+    ws.onopen = () => {
+        $statusLine.html("Running...");
+    };
+
+    ws.onclose = () => {
+        dataDisposable.dispose();
+        activeTerminalWS = null;
+        $runBtn.removeClass("loading");
+        $statusLine.html("Program finished.");
+    };
+
+    ws.onerror = () => {
+        term.write("\r\nERROR: Lost connection to server.\r\n");
+        $runBtn.removeClass("loading");
+        $statusLine.html("Connection error.");
+    };
 }
 
 function fetchSubmission(flavor, region, submission_token, iteration) {

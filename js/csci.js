@@ -52,6 +52,10 @@ async function signIn() {
     console.log("Server response:", result);
 
     if (result.success) {
+      // Store the session token so run() can include it in WebSocket connections.
+      // window is the browser's global object — anything on it is accessible from
+      // any script on the page, including ide.js.
+      window.csciSessionToken = result.token;
       $('#judge0-csci-sign-in-modal').modal('hide');
       showNotification(`Connected to CSCI server as ${username}`, "success");
     } else {
@@ -71,7 +75,9 @@ async function signOut() {
     const response = await fetch("/ssh-sign-out", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "exit" })
+      // Send the stored token so ssh-bridge knows which session to remove.
+      // Previously this sent { action: "exit" } which the updated server doesn't recognize.
+      body: JSON.stringify({ token: window.csciSessionToken })
     });
 
     if (!response.ok) {
@@ -81,6 +87,8 @@ async function signOut() {
     const result = await response.json();
     console.log("Server response:", result);
 
+    // Clear the token from memory — any subsequent run attempts will be rejected
+    window.csciSessionToken = null;
     showNotification("Disconnected from CSCI server.", "warning");
 
   } catch (err) {
