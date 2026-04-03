@@ -6,6 +6,7 @@ const { createProxyMiddleware } = require("http-proxy-middleware");
 const http = require("http");
 const path = require("path");
 const crypto = require("crypto");
+const WebSocket = require("ws");
 
 const app = express();
 
@@ -16,7 +17,7 @@ const JUDGE0_AUTH_TOKEN = "yjjcWNpQGFQMkpmHQasOKegTvGL8yZ1sI4WM7YYkCuVoUwYt";
 // The browser calls /judge0/languages → this strips /judge0 and forwards to localhost:2358/languages
 // The proxy injects the X-Auth-Token header so the browser never needs to know the key
 app.use("/judge0", createProxyMiddleware({
-  target: "http://localhost:2358",//"http://35.153.133.130:2358",
+  target: "http://35.153.133.130:2358",
   changeOrigin: true,
   pathRewrite: { "^/judge0": "" },
   on: {
@@ -120,9 +121,55 @@ app.post("/ssh-sign-out", (req, res) => {
 });
 
 // Start HTTP server on port 3000.
-// Saved to a variable so the WebSocket server can attach to the same port
-// in the next step — both HTTP and WebSocket traffic share port 3000.
+// Saved to a variable so the WebSocket server can attach to the same port —
+// both HTTP and WebSocket traffic share port 3000.
 const httpServer = http.createServer(app);
+
+// Attach the WebSocket server to the same HTTP server.
+// When a browser connects with ws:// instead of http://, the ws library
+// intercepts that "upgrade" request and hands it to this handler.
+// HTTP requests continue going to Express as normal — same port, two protocols.
+const wss = new WebSocket.Server({ server: httpServer });
+
+wss.on("connection", (ws, req) => {
+  // Parse the URL to read the token and mode query parameters.
+  // Example URL: ws://localhost:3000/terminal?token=abc123&mode=compile&lang=91
+  const params = new URLSearchParams(req.url.split("?")[1] || "");
+  const token = params.get("token");
+  const mode  = params.get("mode");  // "compile" or "run"
+
+  console.log(`[WS CONNECT] mode=${mode} token=${token ? token.substring(0, 8) + "..." : "none"}`);
+
+  // Reject the connection immediately if the token is missing or not in the Map.
+  // This is the authentication gate — no valid session means no access.
+  if (!token || !sessions.has(token)) {
+    ws.send("ERROR: Not signed in. Please sign in before running code.\r\n");
+    ws.close();
+    return;
+  }
+
+  // Reject if mode is not one of the two valid values.
+  if (mode !== "compile" && mode !== "run") {
+    ws.send("ERROR: Invalid mode. Must be 'compile' or 'run'.\r\n");
+    ws.close();
+    return;
+  }
+
+  // --- Placeholder: echo messages back to confirm the pipe works ---
+  // This will be replaced with real SSH compile/run logic in a later step.
+  ws.send(`[ssh-bridge] WebSocket connected. mode=${mode}\r\n`);
+  ws.send(`[ssh-bridge] Session verified for user: ${sessions.get(token).username}\r\n`);
+
+  ws.on("message", (data) => {
+    // Echo whatever the browser sends right back to it.
+    ws.send(`[echo] ${data}\r\n`);
+  });
+
+  ws.on("close", () => {
+    console.log(`[WS DISCONNECT] token=${token.substring(0, 8)}...`);
+  });
+});
+
 httpServer.listen(3000, "0.0.0.0", () => {
   console.log("Server running on http://localhost:3000");
 });
