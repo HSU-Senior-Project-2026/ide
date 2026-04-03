@@ -5,6 +5,7 @@ const { Client } = require("ssh2");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const http = require("http");
 const path = require("path");
+const crypto = require("crypto");
 
 const app = express();
 
@@ -15,7 +16,7 @@ const JUDGE0_AUTH_TOKEN = "yjjcWNpQGFQMkpmHQasOKegTvGL8yZ1sI4WM7YYkCuVoUwYt";
 // The browser calls /judge0/languages → this strips /judge0 and forwards to localhost:2358/languages
 // The proxy injects the X-Auth-Token header so the browser never needs to know the key
 app.use("/judge0", createProxyMiddleware({
-  target: "http://localhost:2358",//"http://192.168.56.101:2358",
+  target: "http://localhost:2358",//"http://35.153.133.130:2358",
   changeOrigin: true,
   pathRewrite: { "^/judge0": "" },
   on: {
@@ -42,10 +43,16 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "index.html"));
 });
 
-// Variable to hold active SSH session
-let sshSession = null;
+// Map of session tokens → { username, password }
+// Each student who signs in gets a unique token stored here.
+// When they click Run, they present their token so we know whose credentials to use.
+const sessions = new Map();
 
 // SSH endpoint for sign-in
+// Opens a test SSH connection to validate credentials. On success, generates
+// a unique session token, stores the credentials under that token, closes the
+// test connection, and returns the token to the browser. The browser holds
+// this token and presents it every time the student clicks Run.
 app.post("/ssh-sign-in", (req, res) => {
   const { username, password } = req.body;
 
@@ -60,10 +67,22 @@ app.post("/ssh-sign-in", (req, res) => {
 
   conn.on("ready", () => {
     console.log(`[SSH LOGIN SUCCESS] username: ${username}`);
-    sshSession = conn; // keep the session active for sign-out
+
+    // Generate a cryptographically random token — 32 random bytes turned into
+    // a 64-character hex string. This is unique enough that two students will
+    // never receive the same token.
+    const token = crypto.randomBytes(32).toString("hex");
+
+    // Store the credentials mapped to this token. We close the test connection
+    // below — we don't keep it open. A fresh connection is made on each Run.
+    sessions.set(token, { username, password });
+    console.log(`[SESSION CREATED] token: ${token.substring(0, 8)}... for ${username}`);
+
+    conn.end(); // close the validation connection, credentials are now stored
+
     if (!responded) {
       responded = true;
-      res.json({ success: true, message: "SSH connection established" });
+      res.json({ success: true, token, message: "Signed in successfully" });
     }
   });
 
@@ -85,24 +104,25 @@ app.post("/ssh-sign-in", (req, res) => {
 });
 
 // SSH endpoint for sign-out
+// Removes the student's token from the sessions Map. After this, any attempt
+// to open a WebSocket with that token will be rejected.
 app.post("/ssh-sign-out", (req, res) => {
-  console.log("Sign-out request received:", req.body);
+  const { token } = req.body;
 
-  if (sshSession) {
-    try {
-      sshSession.end(); // safely close SSH session
-      sshSession = null;
-      return res.json({ success: true, message: "SSH session closed" });
-    } catch (err) {
-      console.error("Error closing SSH session:", err);
-      return res.status(500).json({ success: false, message: "Failed to close SSH session" });
-    }
+  if (token && sessions.has(token)) {
+    const { username } = sessions.get(token);
+    sessions.delete(token);
+    console.log(`[SESSION REMOVED] token: ${token.substring(0, 8)}... for ${username}`);
+    return res.json({ success: true, message: "Signed out successfully" });
   } else {
-    return res.status(400).json({ success: false, message: "No active SSH session" });
+    return res.status(400).json({ success: false, message: "No active session found" });
   }
 });
 
-// Start HTTP server on port 80
-http.createServer(app).listen(3000, "127.0.0.1", () => {
+// Start HTTP server on port 3000.
+// Saved to a variable so the WebSocket server can attach to the same port
+// in the next step — both HTTP and WebSocket traffic share port 3000.
+const httpServer = http.createServer(app);
+httpServer.listen(3000, "0.0.0.0", () => {
   console.log("Server running on http://localhost:3000");
 });
