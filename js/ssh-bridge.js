@@ -120,6 +120,18 @@ app.post("/ssh-sign-out", (req, res) => {
   }
 });
 
+// Maps Judge0 language IDs to the filenames and shell commands needed on the
+// CSCI server. compile: null means the language is interpreted — no compile
+// step needed, we just write the file and mark it ready to run immediately.
+const LANGUAGE_COMMANDS = {
+    91:  { file: "Main.java",  compile: "javac Main.java",       run: "java -cp . Main"  },
+    103: { file: "main.c",     compile: "gcc main.c -o main",    run: "./main"           },
+    105: { file: "main.cpp",   compile: "g++ main.cpp -o main",  run: "./main"           },
+    25:  { file: "main.py",    compile: null,                    run: "python3 main.py"  },
+    102: { file: "main.js",    compile: null,                    run: "node main.js"     },
+    46:  { file: "main.sh",    compile: null,                    run: "bash main.sh"     },
+};
+
 // Start HTTP server on port 3000.
 // Saved to a variable so the WebSocket server can attach to the same port —
 // both HTTP and WebSocket traffic share port 3000.
@@ -132,41 +144,196 @@ const httpServer = http.createServer(app);
 const wss = new WebSocket.Server({ server: httpServer });
 
 wss.on("connection", (ws, req) => {
-  // Parse the URL to read the token and mode query parameters.
-  // Example URL: ws://localhost:3000/terminal?token=abc123&mode=compile&lang=91
   const params = new URLSearchParams(req.url.split("?")[1] || "");
-  const token = params.get("token");
-  const mode  = params.get("mode");  // "compile" or "run"
+  const token  = params.get("token");
+  const mode   = params.get("mode");
+  const langId = parseInt(params.get("lang") || "0");
 
-  console.log(`[WS CONNECT] mode=${mode} token=${token ? token.substring(0, 8) + "..." : "none"}`);
+  console.log(`[WS CONNECT] mode=${mode} lang=${langId} token=${token ? token.substring(0, 8) + "..." : "none"}`);
 
-  // Reject the connection immediately if the token is missing or not in the Map.
-  // This is the authentication gate — no valid session means no access.
+  // Auth gate — reject immediately if the token is not in the sessions Map.
   if (!token || !sessions.has(token)) {
     ws.send("ERROR: Not signed in. Please sign in before running code.\r\n");
     ws.close();
     return;
   }
 
-  // Reject if mode is not one of the two valid values.
   if (mode !== "compile" && mode !== "run") {
     ws.send("ERROR: Invalid mode. Must be 'compile' or 'run'.\r\n");
     ws.close();
     return;
   }
 
-  // --- Placeholder: echo messages back to confirm the pipe works ---
-  // This will be replaced with real SSH compile/run logic in a later step.
-  ws.send(`[ssh-bridge] WebSocket connected. mode=${mode}\r\n`);
-  ws.send(`[ssh-bridge] Session verified for user: ${sessions.get(token).username}\r\n`);
+  const session = sessions.get(token);
 
-  ws.on("message", (data) => {
-    // Echo whatever the browser sends right back to it.
-    ws.send(`[echo] ${data}\r\n`);
-  });
+  // ─────────────────────────────────────────────────────────────────────────
+  // COMPILE MODE
+  // The browser sends source code as the first WebSocket message.
+  // We SSH to the CSCI server, write the file, run the compiler, and stream
+  // all output back. When done we close the WebSocket with code 4000 (success)
+  // or 4001 (failure). The browser checks this code to decide whether to
+  // enable the Run button.
+  // ─────────────────────────────────────────────────────────────────────────
+  if (mode === "compile") {
+    const lang = LANGUAGE_COMMANDS[langId];
+    if (!lang) {
+      ws.send(`ERROR: Language ID ${langId} is not supported for SSH execution.\r\n`);
+      ws.close(4001, "unsupported-language");
+      return;
+    }
+
+    // Wait for exactly one message containing the raw source code.
+    ws.once("message", (rawData) => {
+      const sourceCode = rawData.toString();
+      const { username, password } = session;
+
+      // Each student gets a unique temp directory based on their session token.
+      // Using token.substring(0,16) keeps the path short while still being unique.
+      const tmpDir = `/tmp/judge0_${token.substring(0, 16)}`;
+
+      const conn = new Client();
+
+      conn.on("ready", () => {
+        // Base64-encode the source code in Node before sending it to the shell.
+        // This means no matter what characters the student typed — quotes,
+        // backslashes, dollar signs — the file is written safely without any
+        // shell interpretation. printf decodes it byte-for-byte on the other end.
+        const b64 = Buffer.from(sourceCode).toString("base64");
+
+        // Build the full command string:
+        // 1. Delete any previous compile attempt for this student
+        // 2. Create a fresh temp directory
+        // 3. Decode the base64 source into the correct filename
+        // 4. If a compile command exists, run it; otherwise skip (interpreted languages)
+        const compileStep = lang.compile ? ` && cd ${tmpDir} && ${lang.compile}` : "";
+        const fullCmd = `rm -rf ${tmpDir} && mkdir -p ${tmpDir} && printf '%s' '${b64}' | base64 -d > ${tmpDir}/${lang.file}${compileStep}`;
+
+        console.log(`[COMPILE] user=${username} dir=${tmpDir} lang=${langId}`);
+
+        conn.exec(fullCmd, (err, stream) => {
+          if (err) {
+            ws.send(`ERROR: Could not start compile: ${err.message}\r\n`);
+            ws.close(4001, "exec-error");
+            conn.end();
+            return;
+          }
+
+          // Stream stdout and stderr directly to the browser as they arrive.
+          stream.on("data", (data) => ws.send(data.toString()));
+          stream.stderr.on("data", (data) => ws.send(data.toString()));
+
+          stream.on("close", (exitCode) => {
+            conn.end();
+            if (exitCode === 0) {
+              // Store the temp dir and language in the session so run() can find them.
+              session.tmpDir  = tmpDir;
+              session.langId  = langId;
+              console.log(`[COMPILE SUCCESS] user=${username}`);
+              ws.close(4000, "success"); // 4000 signals success to the browser
+            } else {
+              session.tmpDir = null;
+              console.log(`[COMPILE FAILED] user=${username} exitCode=${exitCode}`);
+              ws.close(4001, "failed");  // 4001 signals failure to the browser
+            }
+          });
+        });
+      });
+
+      conn.on("error", (err) => {
+        console.log(`[COMPILE SSH ERROR] ${err.message}`);
+        ws.send(`SSH ERROR: ${err.message}\r\n`);
+        ws.close(4001, "ssh-error");
+      });
+
+      conn.connect({ host: "csci.hsutx.edu", port: 22, username, password, readyTimeout: 10000 });
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RUN MODE
+  // We SSH to the CSCI server and exec the run command with a PTY so the
+  // program behaves exactly like it would in a real terminal — scanf/Scanner
+  // prompts appear immediately, the cursor works, etc.
+  // Data flows in both directions for the lifetime of the connection:
+  //   SSH stdout → WebSocket → xterm.js
+  //   xterm.js keystrokes → WebSocket → SSH stdin
+  // ─────────────────────────────────────────────────────────────────────────
+  if (mode === "run") {
+    if (!session.tmpDir || !session.langId) {
+      ws.send("ERROR: No compiled code found. Please compile before running.\r\n");
+      ws.close();
+      return;
+    }
+
+    const lang     = LANGUAGE_COMMANDS[session.langId];
+    const { username, password, tmpDir } = session;
+
+    const conn = new Client();
+
+    conn.on("ready", () => {
+      // Wrap the run command with:
+      //   timeout 30   — kill the process after 30 seconds wall-clock time
+      //   ulimit -t 10 — 10 seconds CPU time limit
+      //   ulimit -v    — 512MB virtual memory limit (in KB)
+      // This protects the server if a student accidentally writes an infinite loop.
+      const runCmd = `cd ${tmpDir} && timeout 30 bash -c "ulimit -t 10 -v 524288; ${lang.run}"`;
+
+      console.log(`[RUN] user=${username} dir=${tmpDir}`);
+
+      // pty: true is what makes interactive programs work.
+      // Without it, stdin is not connected to a terminal and programs like
+      // Java's Scanner or C's scanf may not flush prompts to the screen.
+      conn.exec(runCmd, { pty: true }, (err, stream) => {
+        if (err) {
+          ws.send(`ERROR: Could not start program: ${err.message}\r\n`);
+          ws.close();
+          conn.end();
+          return;
+        }
+
+        // SSH → browser: forward every byte of program output to the terminal.
+        stream.on("data", (data) => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(data.toString());
+        });
+
+        // browser → SSH: forward every keystroke from xterm.js to the program.
+        ws.on("message", (data) => {
+          stream.write(data.toString());
+        });
+
+        // Program finished normally.
+        stream.on("close", () => {
+          console.log(`[RUN FINISHED] user=${username}`);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send("\r\n[Program exited]\r\n");
+            ws.close();
+          }
+          conn.end();
+        });
+
+        // Browser closed the tab or clicked something that killed the connection.
+        // Kill the remote process too so it doesn't linger on the server.
+        ws.on("close", () => {
+          console.log(`[RUN ABORTED] user=${username}`);
+          stream.close();
+          conn.end();
+        });
+      });
+    });
+
+    conn.on("error", (err) => {
+      console.log(`[RUN SSH ERROR] ${err.message}`);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(`SSH ERROR: ${err.message}\r\n`);
+        ws.close();
+      }
+    });
+
+    conn.connect({ host: "csci.hsutx.edu", port: 22, username, password, readyTimeout: 10000 });
+  }
 
   ws.on("close", () => {
-    console.log(`[WS DISCONNECT] token=${token.substring(0, 8)}...`);
+    console.log(`[WS DISCONNECT] mode=${mode} token=${token.substring(0, 8)}...`);
   });
 });
 

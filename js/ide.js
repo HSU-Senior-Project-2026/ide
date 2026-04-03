@@ -257,6 +257,14 @@ function compileOnly() {
         return;
     }
 
+    // Compilation now happens on the CSCI server via SSH, so the student must
+    // be signed in. The token was stored on window by csci.js after sign-in.
+    const token = window.csciSessionToken;
+    if (!token) {
+        showError("Error", "Please sign in to the CSCI server before compiling.");
+        return;
+    }
+
     lastCompiledCode = null;
     updateRunButtonState();
 
@@ -264,59 +272,56 @@ function compileOnly() {
     if (runOutEditor) runOutEditor.setValue("");
 
     $statusLine.html("Compiling...");
-    // Switch to Compile tab when compiling
+
+    // Switch to the Compile tab so the student sees compiler output.
     const compileTab = layout.root.getItemsById("compileOut")[0];
     if (compileTab && compileTab.parent && compileTab.parent.header && compileTab.parent.header.parent) {
         compileTab.parent.header.parent.setActiveContentItem(compileTab);
     }
 
-    let sourceValue = encode(sourceEditor.getValue());
-    let languageId = getSelectedLanguageId();
-    let flavor = getSelectedLanguageFlavor();
+    const langId   = getSelectedLanguageId();
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl    = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${langId}`;
 
-    let data = {
-        source_code: sourceValue,
-        language_id: languageId,
-        stdin: encode(""),
-        redirect_stderr_to_stdout: false
+    const ws = new WebSocket(wsUrl);
+    let compileOutput = "";
+
+    ws.onopen = () => {
+        // Send the raw source code as the first (and only) message.
+        // ssh-bridge receives it, base64-encodes it for safe shell handling,
+        // writes it to a temp directory, and runs the compile command.
+        ws.send(sourceEditor.getValue());
     };
 
-    $.ajax({
-        url: `${AUTHENTICATED_BASE_URL[flavor]}/submissions?base64_encoded=true&wait=true`,
-        type: "POST",
-        contentType: "application/json",
-        data: JSON.stringify(data),
-        headers: AUTH_HEADERS,
-        success: function (data) {
-            const compileOutput = decode(data.compile_output);
+    ws.onmessage = (event) => {
+        // Accumulate compiler output and update the panel live as it arrives.
+        // This gives the student streaming feedback for slow compilers.
+        compileOutput += event.data;
+        if (compileOutEditor) compileOutEditor.setValue(compileOutput);
+    };
 
+    ws.onclose = (event) => {
+        // ssh-bridge closes with code 4000 on success, 4001 on failure.
+        // This lets us know whether to enable the Run button without needing
+        // to parse the compiler output for error messages.
+        if (event.code === 4000) {
+            lastCompiledCode = currentCode;
             if (compileOutEditor) {
-                compileOutEditor.setValue(
-                    compileOutput ? compileOutput : "Compilation successful."
-                );
+                compileOutEditor.setValue(compileOutput || "Compilation successful.");
             }
-
-            if (runOutEditor) {
-                runOutEditor.setValue("");
-            }
-
-            $statusLine.html(data.status.description);
-
-            // success only when there is no compile output
-            if (!compileOutput) {
-                lastCompiledCode = currentCode;
-            } else {
-                lastCompiledCode = null;
-            }
-
-            updateRunButtonState();
-        },
-        error: function (jqXHR) {
+            $statusLine.html("Compilation successful.");
+        } else {
             lastCompiledCode = null;
-            updateRunButtonState();
-            handleRunError(jqXHR);
+            $statusLine.html("Compilation failed.");
         }
-    });
+        updateRunButtonState();
+    };
+
+    ws.onerror = () => {
+        lastCompiledCode = null;
+        $statusLine.html("Connection error during compilation.");
+        updateRunButtonState();
+    };
 }
 
 function updateRunButtonState() {
