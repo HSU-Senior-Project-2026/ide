@@ -1,30 +1,16 @@
 import { usePuter } from "./puter.js";
 import configuration from "./configuration.js";
 
-// API key and auth are handled server-side by the ssh-bridge proxy — not needed here
-const AUTH_HEADERS = {};
-
-const CE = "CE";
-const EXTRA_CE = "EXTRA_CE";
-
-// Relative URL: browser calls /judge0/... on port 80, proxy forwards to localhost:2358
-const AUTHENTICATED_CE_BASE_URL = "/judge0";
-const AUTHENTICATED_EXTRA_CE_BASE_URL = "/judge0";
-
-var AUTHENTICATED_BASE_URL = {};
-AUTHENTICATED_BASE_URL[CE] = AUTHENTICATED_CE_BASE_URL;
-AUTHENTICATED_BASE_URL[EXTRA_CE] = AUTHENTICATED_EXTRA_CE_BASE_URL;
-
-const UNAUTHENTICATED_CE_BASE_URL = "/judge0";
-const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "/judge0";
-
-var UNAUTHENTICATED_BASE_URL = {};
-UNAUTHENTICATED_BASE_URL[CE] = UNAUTHENTICATED_CE_BASE_URL;
-UNAUTHENTICATED_BASE_URL[EXTRA_CE] = UNAUTHENTICATED_EXTRA_CE_BASE_URL;
-
-const INITIAL_WAIT_TIME_MS = 0;
-const WAIT_TIME_FUNCTION = i => 100;
-const MAX_PROBE_REQUESTS = 600;
+// Supported languages — hardcoded to match LANGUAGE_COMMANDS in ssh-bridge.js.
+// No external Judge0 API needed; all execution happens on the CSCI server via SSH.
+const SUPPORTED_LANGUAGES = [
+    { id: 62,  name: "Java",       source_file: "Main.java", editor_mode: "java" },
+    { id: 103, name: "C (GCC)",    source_file: "main.c",    editor_mode: "c" },
+    { id: 105, name: "C++ (GCC)",  source_file: "main.cpp",  editor_mode: "cpp" },
+    { id: 71,  name: "Python 3",   source_file: "main.py",   editor_mode: "python" },
+    { id: 102, name: "JavaScript (Node.js)", source_file: "main.js", editor_mode: "javascript" },
+    { id: 46,  name: "Bash",       source_file: "main.sh",   editor_mode: "shell" },
+];
 
 var fontSize = 13;
 
@@ -61,10 +47,6 @@ var lastCompiledCode=null;
 var activeTerminalWS = null;
 
 
-var timeStart;
-
-var sqliteAdditionalFiles;
-var languages = {};
 
 var layoutConfig = {
     settings: {
@@ -134,19 +116,6 @@ var layoutConfig = {
 
 var gPuterFile;
 
-function encode(str) {
-    return btoa(unescape(encodeURIComponent(str || "")));
-}
-
-function decode(bytes) {
-    var escaped = escape(atob(bytes || ""));
-    try {
-        return decodeURIComponent(escaped);
-    } catch {
-        return unescape(escaped);
-    }
-}
-
 function showError(title, content) {
     $("#judge0-site-modal #title").html(title);
     $("#judge0-site-modal .content").html(content);
@@ -163,64 +132,6 @@ function showError(title, content) {
     $("#judge0-site-modal").modal("show");
 }
 
-function showHttpError(jqXHR) {
-    showError(`${jqXHR.statusText} (${jqXHR.status})`, `<pre>${JSON.stringify(jqXHR, null, 4)}</pre>`);
-}
-
-function handleRunError(jqXHR) {
-    showHttpError(jqXHR);
-    $runBtn.removeClass("loading");
-
-    window.top.postMessage(JSON.parse(JSON.stringify({
-        event: "runError",
-        data: jqXHR
-    })), "*");
-}
-
-function handleResult(data) {
-    const tat = Math.round(performance.now() - timeStart);
-    console.log(`It took ${tat}ms to get submission result.`);
-
-    const status = data.status;
-    const stdout = decode(data.stdout);
-    const stderr = decode(data.stderr);
-    const compileOutput = data.compile_output ? decode(data.compile_output) : null;
-    const time = (data.time === null ? "-" : data.time + "s");
-    const memory = (data.memory === null ? "-" : data.memory + "KB");
-
-    $statusLine.html(`${status.description}, ${time}, ${memory} (TAT: ${tat}ms)`);
-
-    /*const output = [compileOutput, stdout].filter(x => x).join("\n").trimEnd();
-    stdoutEditor.setValue(output);*/
-    
-    const runtimeOutput = [stdout, stderr].filter(x => x).join("\n").trimEnd();
-    const compileText = (compileOutput || "").trimEnd();
-
-    // Compile tab: show compiler output or a friendly success message
-    if (compileOutEditor) {
-        compileOutEditor.setValue(compileText || "Compilation successful.");
-        const lastLine = compileOutEditor.getModel()?.getLineCount?.() ?? 1;
-        compileOutEditor.revealLine(lastLine);
-    }
-    // Runtime tab: show stdout + stderr (can be empty if program prints nothing)
-    if (runOutEditor) {
-        runOutEditor.setValue(runtimeOutput);
-        const lastLine = runOutEditor.getModel()?.getLineCount?.() ?? 1;
-        runOutEditor.revealLine(lastLine);
-    }
-    const output = [compileText, runtimeOutput].filter(x => x).join("\n").trimEnd();
-    
-    $runBtn.removeClass("loading");
-
-    window.top.postMessage(JSON.parse(JSON.stringify({
-        event: "postExecution",
-        status: data.status,
-        time: data.time,
-        memory: data.memory,
-        output: output
-    })), "*");
-}
-
 // Clear I/O editors and status line before running new code
 function clearIO() {
     // Clear the I/O editors
@@ -235,16 +146,13 @@ function clearIO() {
     if ($runBtn) $runBtn.removeClass("loading");
 }
 
-async function getSelectedLanguage() {
-    return getLanguage(getSelectedLanguageFlavor(), getSelectedLanguageId())
+function getSelectedLanguage() {
+    const id = getSelectedLanguageId();
+    return SUPPORTED_LANGUAGES.find(l => l.id === id) || SUPPORTED_LANGUAGES[0];
 }
 
 function getSelectedLanguageId() {
     return parseInt($selectLanguage.val());
-}
-
-function getSelectedLanguageFlavor() {
-    return $selectLanguage.find(":selected").attr("flavor");
 }
 
 function compileOnly() {
@@ -489,32 +397,6 @@ function openShell() {
     };
 }
 
-function fetchSubmission(flavor, region, submission_token, iteration) {
-    if (iteration >= MAX_PROBE_REQUESTS) {
-        handleRunError({
-            statusText: "Maximum number of probe requests reached.",
-            status: 504
-        }, null, null);
-        return;
-    }
-
-    $.ajax({
-        url: `${UNAUTHENTICATED_BASE_URL[flavor]}/submissions/${submission_token}?base64_encoded=true`,
-        headers: {
-            "X-Judge0-Region": region
-        },
-        success: function (data) {
-            if (data.status.id <= 2) { // In Queue or Processing
-                $statusLine.html(data.status.description);
-                setTimeout(fetchSubmission.bind(null, flavor, region, submission_token, iteration + 1), WAIT_TIME_FUNCTION(iteration));
-            } else {
-                handleResult(data);
-            }
-        },
-        error: handleRunError
-    });
-}
-
 // Helper function to update the source tab title with unsaved changes indicator and saving status
 function updateSourceTabTitle() {
   if (!sourceContainer) return; // source tab not ready yet
@@ -620,68 +502,33 @@ function setFontSizeForAllEditors(fontSize) {
     if (runOutEditor) runOutEditor.updateOptions({ fontSize });
 }
 
-async function loadLangauges() {
-    return new Promise((resolve, reject) => {
-        let options = [];
-
-        $.ajax({
-            url: UNAUTHENTICATED_CE_BASE_URL + "/languages",
-            success: function (data) {
-                for (let i = 0; i < data.length; i++) {
-                    let language = data[i];
-                    let option = new Option(language.name, language.id);
-                    option.setAttribute("flavor", CE);
-                    option.setAttribute("langauge_mode", getEditorLanguageMode(language.name));
-
-                    if (language.id !== 89) {
-                        options.push(option);
-                    }
-
-                    if (language.id === DEFAULT_LANGUAGE_ID) {
-                        option.selected = true;
-                    }
-                }
-            },
-            error: reject
-        }).always(function () {
-            $.ajax({
-                url: UNAUTHENTICATED_EXTRA_CE_BASE_URL + "/languages",
-                success: function (data) {
-                    for (let i = 0; i < data.length; i++) {
-                        let language = data[i];
-                        let option = new Option(language.name, language.id);
-                        option.setAttribute("flavor", EXTRA_CE);
-                        option.setAttribute("langauge_mode", getEditorLanguageMode(language.name));
-
-                        if (options.findIndex((t) => (t.text === option.text)) === -1 && language.id !== 89) {
-                            options.push(option);
-                        }
-                    }
-                },
-                error: reject
-            }).always(function () {
-                options.sort((a, b) => a.text.localeCompare(b.text));
-                $selectLanguage.append(options);
-                $selectLanguage.parent(".ui.dropdown").dropdown("refresh");
-                resolve();
-            });
-        });
+function loadLanguages() {
+    let options = SUPPORTED_LANGUAGES.map(lang => {
+        let option = new Option(lang.name, lang.id);
+        option.setAttribute("langauge_mode", lang.editor_mode);
+        if (lang.id === DEFAULT_LANGUAGE_ID) {
+            option.selected = true;
+        }
+        return option;
     });
-};
 
-async function loadSelectedLanguage(skipSetDefaultSourceCodeName = false) {
+    $selectLanguage.append(options);
+    $selectLanguage.parent(".ui.dropdown").dropdown("refresh");
+}
+
+function loadSelectedLanguage(skipSetDefaultSourceCodeName = false) {
     if (!sourceEditor) {
         console.warn("Editor not initialized yet");
         return;
     }
     monaco.editor.setModelLanguage(sourceEditor.getModel(), $selectLanguage.find(":selected").attr("langauge_mode"));
     if (!skipSetDefaultSourceCodeName) {
-        setSourceCodeName((await getSelectedLanguage()).source_file);
+        setSourceCodeName(getSelectedLanguage().source_file);
     }
 }
 
-function selectLanguageByFlavorAndId(languageId, flavor) {
-    let option = $selectLanguage.find(`[value=${languageId}][flavor=${flavor}]`);
+function selectLanguageById(languageId) {
+    let option = $selectLanguage.find(`[value=${languageId}]`);
     if (option.length) {
         option.prop("selected", true);
         $selectLanguage.trigger("change", { skipSetDefaultSourceCodeName: true });
@@ -690,35 +537,15 @@ function selectLanguageByFlavorAndId(languageId, flavor) {
 
 function selectLanguageForExtension(extension) {
     let language = getLanguageForExtension(extension);
-    selectLanguageByFlavorAndId(language.language_id, language.flavor);
-}
-
-async function getLanguage(flavor, languageId) {
-    return new Promise((resolve, reject) => {
-        if (languages[flavor] && languages[flavor][languageId]) {
-            resolve(languages[flavor][languageId]);
-            return;
-        }
-
-        $.ajax({
-            url: `${UNAUTHENTICATED_BASE_URL[flavor]}/languages/${languageId}`,
-            success: function (data) {
-                if (!languages[flavor]) {
-                    languages[flavor] = {};
-                }
-
-                languages[flavor][languageId] = data;
-                resolve(data);
-            },
-            error: reject
-        });
-    });
+    if (language) {
+        selectLanguageById(language.language_id);
+    }
 }
 
 function setDefaults() {
     setFontSizeForAllEditors(fontSize);
     sourceEditor.setValue(DEFAULT_SOURCE);
-    stdinEditor.setValue(DEFAULT_STDIN);
+    stdinEditor.setValue("");
     $compilerOptions.val(DEFAULT_COMPILER_OPTIONS);
     $commandLineArguments.val(DEFAULT_CMD_ARGUMENTS);
 
@@ -766,7 +593,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         loadSelectedLanguage(skipSetDefaultSourceCodeName);
     });
 
-    await loadLangauges();
+    loadLanguages();
     // Default editor language for MVP
     const JAVA_ID = "91"; // replace after you confirm
     $selectLanguage.parent(".ui.dropdown").dropdown("set selected", JAVA_ID);
@@ -1121,8 +948,8 @@ document.addEventListener("DOMContentLoaded", async function () {
             if (e.data.source_code) {
                 sourceEditor.setValue(e.data.source_code);
             }
-            if (e.data.language_id && e.data.flavor) {
-                selectLanguageByFlavorAndId(e.data.language_id, e.data.flavor);
+            if (e.data.language_id) {
+                selectLanguageById(e.data.language_id);
             }
             if (e.data.stdin) {
                 stdinEditor.setValue(e.data.stdin);
@@ -1135,9 +962,6 @@ document.addEventListener("DOMContentLoaded", async function () {
             }
             if (e.data.command_line_arguments) {
                 $commandLineArguments.val(e.data.command_line_arguments);
-            }
-            if (e.data.api_key) {
-                AUTH_HEADERS["Authorization"] = `Bearer ${e.data.api_key}`;
             }
         } else if (e.data.action === "run") {
             run();
@@ -1153,83 +977,21 @@ public class Main {\n\
 }\n\
 ";
 
-/*const DEFAULT_STDIN = "\
-3\n\
-3 2\n\
-1 2 5\n\
-2 3 7\n\
-1 3\n\
-3 3\n\
-1 2 4\n\
-1 3 7\n\
-2 3 1\n\
-1 3\n\
-3 1\n\
-1 2 4\n\
-1 3\n\
-";*/
-
 const DEFAULT_COMPILER_OPTIONS = "";
 const DEFAULT_CMD_ARGUMENTS = "";
-const DEFAULT_LANGUAGE_ID = 62; // Java (OpenJDK 13.0.1) (https://ce.judge0.com/languages/62)
+const DEFAULT_LANGUAGE_ID = 62; // Java
 
-function getEditorLanguageMode(languageName) {
-    const DEFAULT_EDITOR_LANGUAGE_MODE = "plaintext";
-    const LANGUAGE_NAME_TO_LANGUAGE_EDITOR_MODE = {
-        "Bash": "shell",
-        "C": "c",
-        "C3": "c",
-        "C#": "csharp",
-        "C++": "cpp",
-        "Clojure": "clojure",
-        "F#": "fsharp",
-        "Go": "go",
-        "Java": "java",
-        "JavaScript": "javascript",
-        "Kotlin": "kotlin",
-        "Objective-C": "objective-c",
-        "Pascal": "pascal",
-        "Perl": "perl",
-        "PHP": "php",
-        "Python": "python",
-        "R": "r",
-        "Ruby": "ruby",
-        "SQL": "sql",
-        "Swift": "swift",
-        "TypeScript": "typescript",
-        "Visual Basic": "vb"
-    }
-
-    for (let key in LANGUAGE_NAME_TO_LANGUAGE_EDITOR_MODE) {
-        if (languageName.toLowerCase().startsWith(key.toLowerCase())) {
-            return LANGUAGE_NAME_TO_LANGUAGE_EDITOR_MODE[key];
-        }
-    }
-    return DEFAULT_EDITOR_LANGUAGE_MODE;
-}
-
+// Maps file extensions to language IDs for the "Open File" feature.
+// Only extensions matching SUPPORTED_LANGUAGES are included.
 const EXTENSIONS_TABLE = {
-    "asm": { "flavor": CE, "language_id": 45 }, // Assembly (NASM 2.14.02)
-    "c": { "flavor": CE, "language_id": 103 }, // C (GCC 14.1.0)
-    "cpp": { "flavor": CE, "language_id": 105 }, // C++ (GCC 14.1.0)
-    "cs": { "flavor": EXTRA_CE, "language_id": 29 }, // C# (.NET Core SDK 7.0.400)
-    "go": { "flavor": CE, "language_id": 95 }, // Go (1.18.5)
-    "java": { "flavor": CE, "language_id": 91 }, // Java (JDK 17.0.6)
-    "js": { "flavor": CE, "language_id": 102 }, // JavaScript (Node.js 22.08.0)
-    "lua": { "flavor": CE, "language_id": 64 }, // Lua (5.3.5)
-    "pas": { "flavor": CE, "language_id": 67 }, // Pascal (FPC 3.0.4)
-    "php": { "flavor": CE, "language_id": 98 }, // PHP (8.3.11)
-    "py": { "flavor": EXTRA_CE, "language_id": 25 }, // Python for ML (3.11.2)
-    "r": { "flavor": CE, "language_id": 99 }, // R (4.4.1)
-    "rb": { "flavor": CE, "language_id": 72 }, // Ruby (2.7.0)
-    "rs": { "flavor": CE, "language_id": 73 }, // Rust (1.40.0)
-    "scala": { "flavor": CE, "language_id": 81 }, // Scala (2.13.2)
-    "sh": { "flavor": CE, "language_id": 46 }, // Bash (5.0.0)
-    "swift": { "flavor": CE, "language_id": 83 }, // Swift (5.2.3)
-    "ts": { "flavor": CE, "language_id": 101 }, // TypeScript (5.6.2)
-    "txt": { "flavor": CE, "language_id": 43 }, // Plain Text
+    "java": { language_id: 62 },
+    "c":    { language_id: 103 },
+    "cpp":  { language_id: 105 },
+    "py":   { language_id: 71 },
+    "js":   { language_id: 102 },
+    "sh":   { language_id: 46 },
 };
 
 function getLanguageForExtension(extension) {
-    return EXTENSIONS_TABLE[extension] || { "flavor": CE, "language_id": 43 }; // Plain Text (https://ce.judge0.com/languages/43)
+    return EXTENSIONS_TABLE[extension] || null;
 }
