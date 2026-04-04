@@ -977,11 +977,6 @@ document.addEventListener("DOMContentLoaded", async function () {
 
             window.sourceEditors[fileId] = editor;
 
-            // Attach vim mode if enabled
-            try {
-                if (window.__vimHelpers) window.__vimHelpers.attachVim(fileId, editor);
-            } catch(e) {}
-
             container.on("show", () => {
                 sourceEditor = editor;
                 sourceContainer = container;
@@ -1002,6 +997,11 @@ document.addEventListener("DOMContentLoaded", async function () {
                     FileManager.activeFolderId = parentId;
                 }
                 FileManager.render();
+
+                // Reattach vim to the newly active editor
+                try {
+                    if (window.__vimHelpers) window.__vimHelpers.reattach();
+                } catch(e) {}
             });
 
             container.on("destroy", () => {
@@ -1014,7 +1014,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                     }
                 } catch (e) {}
                 try {
-                    if (window.__vimHelpers) window.__vimHelpers.detachVim(fileId);
+                    if (window.__vimHelpers) window.__vimHelpers.detach();
                 } catch(e) {}
                 delete window.sourceEditors[fileId];
                 editor.dispose();
@@ -1310,9 +1310,9 @@ document.addEventListener("DOMContentLoaded", async function () {
         layout.init();
     });
 
-    // Vim mode support
+    // Vim mode support — only one instance at a time (the active tab)
     var vimEnabled = localStorage.getItem("judge0.vimMode") === "on";
-    var vimModeInstances = {}; // fileId -> vim dispose handle
+    var activeVimInstance = null;
     var MonacoVim = null;
 
     // Load monaco-vim module
@@ -1326,45 +1326,38 @@ document.addEventListener("DOMContentLoaded", async function () {
     function applyVimMode() {
         var statusBar = document.getElementById("vim-status-bar");
         var vimBtn = document.getElementById("vim-toggle-btn");
-        if (vimEnabled && MonacoVim) {
+
+        // Always dispose the current instance first
+        if (activeVimInstance) {
+            activeVimInstance.dispose();
+            activeVimInstance = null;
+        }
+        statusBar.innerHTML = "";
+
+        if (vimEnabled && MonacoVim && sourceEditor) {
             statusBar.style.display = "block";
             if (vimBtn) { vimBtn.style.opacity = "1"; vimBtn.style.color = "#4ec9b0"; }
-            // Enable vim for all open editors
-            Object.keys(window.sourceEditors).forEach(function(fileId) {
-                if (!vimModeInstances[fileId]) {
-                    var ed = window.sourceEditors[fileId];
-                    if (ed) {
-                        vimModeInstances[fileId] = MonacoVim.initVimMode(ed, statusBar);
-                    }
-                }
-            });
+            activeVimInstance = MonacoVim.initVimMode(sourceEditor, statusBar);
         } else {
             statusBar.style.display = "none";
-            statusBar.innerHTML = "";
             if (vimBtn) { vimBtn.style.opacity = "0.6"; vimBtn.style.color = ""; }
-            // Dispose all vim instances
-            Object.keys(vimModeInstances).forEach(function(fileId) {
-                if (vimModeInstances[fileId]) {
-                    vimModeInstances[fileId].dispose();
-                    delete vimModeInstances[fileId];
-                }
-            });
         }
     }
 
-    // Expose for the source component to call when new tabs are created
+    // Called when tabs switch — reattach vim to the newly active editor
     window.__vimHelpers = {
-        attachVim: function(fileId, editor) {
+        reattach: function() {
             if (vimEnabled && MonacoVim) {
-                var statusBar = document.getElementById("vim-status-bar");
-                vimModeInstances[fileId] = MonacoVim.initVimMode(editor, statusBar);
+                applyVimMode();
             }
         },
-        detachVim: function(fileId) {
-            if (vimModeInstances[fileId]) {
-                vimModeInstances[fileId].dispose();
-                delete vimModeInstances[fileId];
+        detach: function() {
+            if (activeVimInstance) {
+                activeVimInstance.dispose();
+                activeVimInstance = null;
             }
+            var statusBar = document.getElementById("vim-status-bar");
+            if (statusBar) statusBar.innerHTML = "";
         }
     };
 
