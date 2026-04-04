@@ -72,6 +72,32 @@ export const FileManager = {
         this.openFile(newNode.id);
     },
 
+    createAndRenameFile() {
+        let baseName = "untitled.py";
+        let counter = "";
+        let name = baseName;
+        let exists = (n) => this.tree.some(f => f.name === n);
+        
+        while (exists(name)) {
+            counter = (counter === "") ? 1 : counter + 1;
+            name = `untitled ${counter}.py`;
+        }
+        
+        const newId = this.generateId();
+        this.tree.push({
+            id: newId,
+            name: name,
+            type: "file",
+            content: "def main():\n    pass\n\nif __name__ == \"__main__\":\n    main()\n"
+        });
+        
+        this.saveWorkspace();
+        this.openFile(newId);
+        
+        this.pendingRenameFileId = newId;
+        this.render();
+    },
+
     saveActiveFile(content) {
         const file = this.findFile(this.activeFileId, this.tree);
         if (file) {
@@ -215,7 +241,14 @@ export const FileManager = {
                     
                     el.replaceChild(inputEl, nameEl);
                     inputEl.focus();
-                    inputEl.select();
+                    
+                    // VS Code specifies selecting the text without the extension by default, but selecting all is fine too
+                    let dotIndex = node.name.lastIndexOf('.');
+                    if (dotIndex > 0) {
+                        inputEl.setSelectionRange(0, dotIndex);
+                    } else {
+                        inputEl.select();
+                    }
                 };
 
                 el.onmouseenter = () => renameEl.style.display = "block";
@@ -226,6 +259,11 @@ export const FileManager = {
                 el.appendChild(nameEl);
                 el.appendChild(renameEl);
                 
+                if (this.pendingRenameFileId === node.id) {
+                    this.pendingRenameFileId = null;
+                    setTimeout(() => renameEl.onclick(new Event('click')), 10);
+                }
+
                 el.onclick = (e) => {
                     e.stopPropagation();
                     if (node.type === "folder") {

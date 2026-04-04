@@ -1147,9 +1147,7 @@ document.addEventListener("DOMContentLoaded", async function () {
             var sidebarNewFileBtn = document.getElementById("sidebar-new-file");
             if (sidebarNewFileBtn) {
                 sidebarNewFileBtn.addEventListener("click", function () {
-                    $("#new-file-name").val("");
-                    $("#judge0-new-file-modal").modal({ closable: true }).modal("show");
-                    setTimeout(function () { document.getElementById("new-file-name").focus(); }, 100);
+                    FileManager.createAndRenameFile();
                 });
             }
 
@@ -1270,31 +1268,6 @@ document.addEventListener("DOMContentLoaded", async function () {
         applyWordWrap();
     });
 
-    // New File modal handlers
-    document.getElementById("judge0-new-file-btn")?.addEventListener("click", function () {
-        $("#new-file-name").val("");
-        $("#judge0-new-file-modal").modal({ closable: true }).modal("show");
-        setTimeout(function () { document.getElementById("new-file-name").focus(); }, 100);
-    });
-    document.getElementById("judge0-new-file-create-btn").addEventListener("click", function () {
-        var filename = document.getElementById("new-file-name").value.trim();
-        if (!filename) {
-            alert("Please enter a filename.");
-            return;
-        }
-        FileManager.createFile(filename);
-        $("#judge0-new-file-modal").modal("hide");
-    });
-    document.getElementById("judge0-new-file-cancel-btn").addEventListener("click", function () {
-        $("#judge0-new-file-modal").modal("hide");
-    });
-
-
-    // Allow pressing Enter to create the file
-    document.getElementById("judge0-new-file-form").addEventListener("submit", function (e) {
-        e.preventDefault();
-        document.getElementById("judge0-new-file-create-btn").click();
-    });
 
 
 
