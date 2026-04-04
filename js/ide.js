@@ -1160,6 +1160,36 @@ document.addEventListener("DOMContentLoaded", async function () {
                 });
             }
 
+            // Resizer handle logic
+            var resizer = document.getElementById("sidebar-resizer");
+            var sidebar = document.getElementById("judge0-sidebar");
+            var isResizing = false;
+
+            if (resizer && sidebar) {
+                resizer.addEventListener("mousedown", function(e) {
+                    isResizing = true;
+                    document.body.style.cursor = 'col-resize';
+                    resizer.classList.add("dragging");
+                });
+
+                document.addEventListener("mousemove", function(e) {
+                    if (!isResizing) return;
+                    var newWidth = e.clientX - sidebar.getBoundingClientRect().left;
+                    if (newWidth > 150 && newWidth < 800) {
+                        sidebar.style.width = newWidth + "px";
+                        refreshLayoutSize();
+                    }
+                });
+
+                document.addEventListener("mouseup", function(e) {
+                    if (isResizing) {
+                        isResizing = false;
+                        document.body.style.cursor = '';
+                        resizer.classList.remove("dragging");
+                    }
+                });
+            }
+
             // Handle explicit close button from sidebar
             var sidebarCloseBtn = document.getElementById("sidebar-close");
             if (sidebarCloseBtn) {

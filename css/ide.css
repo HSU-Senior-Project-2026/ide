@@ -139,13 +139,29 @@ html, body {
 #judge0-sidebar {
     width: 240px;
     min-width: 180px;
-    max-width: 400px;
+    max-width: 600px;
     background: #252526;
     border-right: 1px solid #1e1e1e;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    position: relative;
     z-index: 99;
+}
+
+#sidebar-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 4px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    z-index: 100;
+}
+
+#sidebar-resizer:hover, #sidebar-resizer.dragging {
+    background: #007fd4;
 }
 
 #judge0-sidebar.collapsed {
