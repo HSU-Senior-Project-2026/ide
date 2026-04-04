@@ -42,8 +42,8 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "index.html"));
 });
 
-// Variable to hold active SSH session
-let sshSession = null;
+// Store SSH sessions per user instead of one global session
+const sshSessions = {};
 
 // SSH endpoint for sign-in
 app.post("/ssh-sign-in", (req, res) => {
@@ -60,7 +60,7 @@ app.post("/ssh-sign-in", (req, res) => {
 
   conn.on("ready", () => {
     console.log(`[SSH LOGIN SUCCESS] username: ${username}`);
-    sshSession = conn; // keep the session active for sign-out
+    sshSessions[username] = conn; // keep the session active for sign-out, Save this user's SSH session using their username as the key
     if (!responded) {
       responded = true;
       res.json({ success: true, message: "SSH connection established" });
@@ -81,6 +81,192 @@ app.post("/ssh-sign-in", (req, res) => {
     username,
     password,
     readyTimeout: 10000,
+  });
+});
+
+// File listing endpoint
+// Uses the logged-in user's SSH session to access their current server directory
+// For now, this is a simple test route to confirm that:
+// 1. the user has an active SSH session
+// 2. we can execute commands through that session
+// 3. we can see the files available in that user's directory
+app.get("/list-files", (req, res) => {
+  const username = req.query.username;
+
+  // Make sure a username was provided
+  if (!username) {
+    return res.status(400).json({
+      success: false,
+      error: "Username is required."
+    });
+  }
+
+  // Look up this user's SSH session
+  const userSession = sshSessions[username];
+
+  // If no active SSH session exists, the user must sign in first
+  if (!userSession) {
+    return res.status(401).json({
+      success: false,
+      error: "No active SSH session found for this user. Please sign in first."
+    });
+  }
+
+  // Run a simple command on the server:
+  // - pwd shows the current directory
+  // - ls -la lists all files, including hidden ones, with details
+  userSession.exec("pwd && ls -la", (err, stream) => {
+    if (err) {
+      console.error(`[LIST FILES ERROR] ${username}:`, err);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to execute file listing command."
+      });
+    }
+
+    let output = "";
+    let errorOutput = "";
+
+    stream.on("data", (data) => {
+      output += data.toString();
+    });
+
+    stream.stderr.on("data", (data) => {
+      errorOutput += data.toString();
+    });
+
+    stream.on("close", () => {
+      if (errorOutput) {
+        console.error(`[LIST FILES STDERR] ${username}:`, errorOutput);
+      }
+
+      return res.json({
+        success: true,
+        username,
+        output
+      });
+    });
+  });
+});
+
+// Read file endpoint
+// Reads the contents of a specific file from the user's server directory
+app.get("/read-file", (req, res) => {
+  const { username, path } = req.query;
+
+  // Validate inputs
+  if (!username || !path) {
+    return res.status(400).json({
+      success: false,
+      error: "Username and file path are required."
+    });
+  }
+
+  const userSession = sshSessions[username];
+
+  // Ensure user is logged in
+  if (!userSession) {
+    return res.status(401).json({
+      success: false,
+      error: "No active SSH session. Please sign in first."
+    });
+  }
+
+  // Use 'cat' to read file contents
+  userSession.exec(`cat ${path}`, (err, stream) => {
+    if (err) {
+      console.error(`[READ FILE ERROR] ${username}:`, err);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to read file."
+      });
+    }
+
+    let output = "";
+    let errorOutput = "";
+
+    stream.on("data", (data) => {
+      output += data.toString();
+    });
+
+    stream.stderr.on("data", (data) => {
+      errorOutput += data.toString();
+    });
+
+    stream.on("close", () => {
+      if (errorOutput) {
+        return res.status(400).json({
+          success: false,
+          error: errorOutput
+        });
+      }
+
+      return res.json({
+        success: true,
+        path,
+        content: output
+      });
+    });
+  });
+});
+
+// Write file endpoint
+// Saves (or overwrites) a file in the user's server directory
+app.post("/write-file", (req, res) => {
+  const { username, path, content } = req.body;
+
+  // Validate inputs
+  if (!username || !path || content === undefined) {
+    return res.status(400).json({
+      success: false,
+      error: "Username, file path, and content are required."
+    });
+  }
+
+  const userSession = sshSessions[username];
+
+  // Ensure user is logged in
+  if (!userSession) {
+    return res.status(401).json({
+      success: false,
+      error: "No active SSH session. Please sign in first."
+    });
+  }
+
+  // Escape double quotes and special characters for safe writing
+  const safeContent = content.replace(/"/g, '\\"');
+
+  // Use echo to overwrite file content
+  const command = `echo "${safeContent}" > ${path}`;
+
+  userSession.exec(command, (err, stream) => {
+    if (err) {
+      console.error(`[WRITE FILE ERROR] ${username}:`, err);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to write file."
+      });
+    }
+
+    let errorOutput = "";
+
+    stream.stderr.on("data", (data) => {
+      errorOutput += data.toString();
+    });
+
+    stream.on("close", () => {
+      if (errorOutput) {
+        return res.status(400).json({
+          success: false,
+          error: errorOutput
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: `File ${path} saved successfully.`
+      });
+    });
   });
 });
 
