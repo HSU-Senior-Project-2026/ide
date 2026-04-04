@@ -1000,6 +1000,14 @@ document.addEventListener("DOMContentLoaded", async function () {
             });
 
             container.on("destroy", () => {
+                // Save content before disposing
+                try {
+                    let file = FileManager.findFile(fileId, FileManager.tree);
+                    if (file) {
+                        file.content = editor.getValue();
+                        FileManager.saveWorkspace();
+                    }
+                } catch (e) {}
                 delete window.sourceEditors[fileId];
                 editor.dispose();
             });
