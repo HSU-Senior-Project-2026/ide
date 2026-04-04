@@ -290,23 +290,27 @@ wss.on("connection", (ws, req) => {
     const conn = new Client();
 
     conn.on("ready", () => {
-      // Build the run command in a single flat shell — no nested bash -c.
-      // The SSH exec already runs through /bin/sh, so shell features (&&, ulimit)
-      // are available directly. Nesting bash -c inside bash -c created a deep
-      // process chain that interfered with how the PTY's terminal modes propagated
-      // to the Java process, causing scanner.nextInt() to not block correctly.
-      //   ulimit -t 10  — 10 seconds CPU time; catches infinite loops
-      //   timeout 30    — wall-clock time limit; kills frozen programs
-      const runCmd = `ulimit -t 10 && cd ${tmpDir} && timeout 30 ${lang.run}`;
+      // Build the run command using exec so that the student's program *replaces*
+      // the shell process and becomes the direct owner of the PTY. This is critical
+      // for interactive I/O: without exec, the program runs as a grandchild process
+      // that is NOT in the PTY's foreground process group, which causes reads from
+      // stdin to hang after the first input (the terminal driver sends SIGTTIN to
+      // background processes attempting to read).
+      //
+      // Previously we used `timeout 30` here, but GNU timeout creates a new process
+      // group for its child by default, which broke the PTY foreground group ownership
+      // and caused Scanner/scanf/input() to freeze after the first interactive read.
+      //
+      //   ulimit -t 10  — CPU time limit; catches infinite loops
+      //   exec          — replaces the shell with the program so it owns the PTY
+      //
+      // Wall-clock timeout is enforced in Node.js below (RUN_TIMEOUT_MS) instead of
+      // relying on the `timeout` command, since we need the program to be the PTY
+      // session leader for interactive I/O to work correctly.
+      const runCmd = `ulimit -t 10 && cd ${tmpDir} && exec ${lang.run}`;
 
       console.log(`[RUN] user=${username} dir=${tmpDir}`);
 
-      // Specify PTY options explicitly rather than using { pty: true } defaults.
-      // term: 'xterm-256color' — matches what xterm.js emulates, ensures the
-      //   program gets correct escape sequences and color support.
-      // cols/rows — reasonable defaults; keeps line wrapping correct for most programs.
-      // Setting these explicitly ensures canonical mode (line buffering, echo) is
-      // active, which is what Scanner/scanf/input() need to work interactively.
       conn.exec(runCmd, { pty: { term: "xterm-256color", cols: 220, rows: 50 } }, (err, stream) => {
         if (err) {
           ws.send(`ERROR: Could not start program: ${err.message}\r\n`);
@@ -314,6 +318,19 @@ wss.on("connection", (ws, req) => {
           conn.end();
           return;
         }
+
+        // Wall-clock timeout — kills the program if it runs longer than 30 seconds.
+        // This replaces the GNU `timeout` command that we can no longer use (see above).
+        const RUN_TIMEOUT_MS = 30000;
+        const runTimer = setTimeout(() => {
+          console.log(`[RUN TIMEOUT] user=${username} — killed after ${RUN_TIMEOUT_MS / 1000}s`);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send("\r\n[Program killed: exceeded 30 second time limit]\r\n");
+            ws.close();
+          }
+          stream.close();
+          conn.end();
+        }, RUN_TIMEOUT_MS);
 
         // SSH → browser: forward every byte of program output to the terminal.
         stream.on("data", (data) => {
@@ -327,6 +344,7 @@ wss.on("connection", (ws, req) => {
 
         // Program finished normally.
         stream.on("close", () => {
+          clearTimeout(runTimer);
           console.log(`[RUN FINISHED] user=${username}`);
           if (ws.readyState === WebSocket.OPEN) {
             ws.send("\r\n[Program exited]\r\n");
@@ -338,6 +356,7 @@ wss.on("connection", (ws, req) => {
         // Browser closed the tab or clicked something that killed the connection.
         // Kill the remote process too so it doesn't linger on the server.
         ws.on("close", () => {
+          clearTimeout(runTimer);
           console.log(`[RUN ABORTED] user=${username}`);
           stream.close();
           conn.end();
