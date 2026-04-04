@@ -92,6 +92,7 @@ export const FileManager = {
     },
 
     openFile(id) {
+        if (this.activeFileId === id) return; // Prevent double-click wiping race condition
         const file = this.findFile(id, this.tree);
         if (file) {
             this.activeFileId = id;
