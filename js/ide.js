@@ -977,6 +977,11 @@ document.addEventListener("DOMContentLoaded", async function () {
 
             window.sourceEditors[fileId] = editor;
 
+            // Attach vim mode if enabled
+            try {
+                if (window.__vimHelpers) window.__vimHelpers.attachVim(fileId, editor);
+            } catch(e) {}
+
             container.on("show", () => {
                 sourceEditor = editor;
                 sourceContainer = container;
@@ -1008,6 +1013,9 @@ document.addEventListener("DOMContentLoaded", async function () {
                         FileManager.saveWorkspace();
                     }
                 } catch (e) {}
+                try {
+                    if (window.__vimHelpers) window.__vimHelpers.detachVim(fileId);
+                } catch(e) {}
                 delete window.sourceEditors[fileId];
                 editor.dispose();
             });
@@ -1301,6 +1309,73 @@ document.addEventListener("DOMContentLoaded", async function () {
 
         layout.init();
     });
+
+    // Vim mode support
+    var vimEnabled = localStorage.getItem("judge0.vimMode") === "on";
+    var vimModeInstances = {}; // fileId -> vim dispose handle
+    var MonacoVim = null;
+
+    // Load monaco-vim module
+    require(["monaco-vim"], function (mod) {
+        MonacoVim = mod;
+        if (vimEnabled) {
+            applyVimMode();
+        }
+    });
+
+    function applyVimMode() {
+        var statusBar = document.getElementById("vim-status-bar");
+        var vimBtn = document.getElementById("vim-toggle-btn");
+        if (vimEnabled && MonacoVim) {
+            statusBar.style.display = "block";
+            if (vimBtn) { vimBtn.style.opacity = "1"; vimBtn.style.color = "#4ec9b0"; }
+            // Enable vim for all open editors
+            Object.keys(window.sourceEditors).forEach(function(fileId) {
+                if (!vimModeInstances[fileId]) {
+                    var ed = window.sourceEditors[fileId];
+                    if (ed) {
+                        vimModeInstances[fileId] = MonacoVim.initVimMode(ed, statusBar);
+                    }
+                }
+            });
+        } else {
+            statusBar.style.display = "none";
+            statusBar.innerHTML = "";
+            if (vimBtn) { vimBtn.style.opacity = "0.6"; vimBtn.style.color = ""; }
+            // Dispose all vim instances
+            Object.keys(vimModeInstances).forEach(function(fileId) {
+                if (vimModeInstances[fileId]) {
+                    vimModeInstances[fileId].dispose();
+                    delete vimModeInstances[fileId];
+                }
+            });
+        }
+    }
+
+    // Expose for the source component to call when new tabs are created
+    window.__vimHelpers = {
+        attachVim: function(fileId, editor) {
+            if (vimEnabled && MonacoVim) {
+                var statusBar = document.getElementById("vim-status-bar");
+                vimModeInstances[fileId] = MonacoVim.initVimMode(editor, statusBar);
+            }
+        },
+        detachVim: function(fileId) {
+            if (vimModeInstances[fileId]) {
+                vimModeInstances[fileId].dispose();
+                delete vimModeInstances[fileId];
+            }
+        }
+    };
+
+    var vimToggleBtn = document.getElementById("vim-toggle-btn");
+    if (vimToggleBtn) {
+        vimToggleBtn.addEventListener("click", function () {
+            vimEnabled = !vimEnabled;
+            try { localStorage.setItem("judge0.vimMode", vimEnabled ? "on" : "off"); } catch (e) {}
+            applyVimMode();
+        });
+    }
 
     let superKey = "⌘";
     if (!/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {

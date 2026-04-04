@@ -29,7 +29,8 @@
     <script>
         var require = {
             paths: {
-                "vs": "./vendor/monaco-editor-0.44.0/min/vs"
+                "vs": "./vendor/monaco-editor-0.44.0/min/vs",
+                "monaco-vim": "https://unpkg.com/monaco-vim@0.4.2/dist/monaco-vim"
             }
         };
     </script>
@@ -146,6 +147,9 @@
             </button>
         </div>
         <div class="right menu">
+            <div id="vim-toggle-btn" class="icon link item" title="Toggle Vim Mode" style="font-weight: bold; font-size: 12px; opacity: 0.6;">
+                VIM
+            </div>
             <div id="judge0-theme-toggle-btn" class="icon link item judge0-showThemeButton" data-content="">
                 <i id="judge0-theme-toggle-btn-icon" class="sun icon"></i>
             </div>
@@ -293,6 +297,7 @@
         </div>
     </div>
 
+    <div id="vim-status-bar" style="display:none; position:fixed; bottom:0; left:0; right:0; height:22px; background:#1e1e1e; color:#d4d4d4; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:22px; padding:0 12px; z-index:200; border-top:1px solid #333;"></div>
     <div id="judge0-status-line" class="ui bottom right attached mini label judge0-showStatusLine"></div>
 
     <script>
