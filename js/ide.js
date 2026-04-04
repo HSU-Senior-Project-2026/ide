@@ -1170,7 +1170,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                     if (explorerIcon) explorerIcon.classList.remove("active");
                     if (sidebar) sidebar.classList.add("collapsed");
                     
-                    setTimeout(function () { refreshLayoutSize(); }, 200);
+                    refreshLayoutSize();
                 });
             }
 
@@ -1191,8 +1191,8 @@ document.addEventListener("DOMContentLoaded", async function () {
                         sidebar.classList.remove("collapsed");
                     }
 
-                    // Give Golden Layout time to notice the resize
-                    setTimeout(function () { refreshLayoutSize(); }, 200);
+                    // Refresh immediately for a snappy UX
+                    refreshLayoutSize();
                 });
             });
 

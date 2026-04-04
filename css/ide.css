@@ -146,7 +146,6 @@ html, body {
     flex-direction: column;
     overflow: hidden;
     z-index: 99;
-    transition: width 0.15s ease;
 }
 
 #judge0-sidebar.collapsed {
