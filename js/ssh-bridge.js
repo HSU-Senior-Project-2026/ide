@@ -15,7 +15,7 @@ const JUDGE0_AUTH_TOKEN = "yjjcWNpQGFQMkpmHQasOKegTvGL8yZ1sI4WM7YYkCuVoUwYt";
 // The browser calls /judge0/languages → this strips /judge0 and forwards to localhost:2358/languages
 // The proxy injects the X-Auth-Token header so the browser never needs to know the key
 app.use("/judge0", createProxyMiddleware({
-  target: "http://localhost:2358",//"http://192.168.56.101:2358",
+  target: "http://35.153.133.130:2358",//"http://192.168.56.101:2358",
   changeOrigin: true,
   pathRewrite: { "^/judge0": "" },
   on: {
