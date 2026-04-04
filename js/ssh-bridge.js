@@ -290,25 +290,24 @@ wss.on("connection", (ws, req) => {
     const conn = new Client();
 
     conn.on("ready", () => {
-      // Wrap the run command with:
-      //   timeout 30   — kill the process after 30 seconds wall-clock time
-      //   ulimit -t 10 — 10 seconds CPU time limit
-      //   ulimit -v    — 512MB virtual memory limit (in KB)
-      // This protects the server if a student accidentally writes an infinite loop.
-      // timeout 30  — kills the process after 30 seconds wall-clock time
-      // ulimit -t 10 — 10 seconds CPU time; catches infinite loops
-      // ulimit -v was removed: Java needs several hundred MB of virtual address
-      // space just to initialize the JVM, so a virtual memory cap causes the
-      // VM to fail before the student's code ever runs. The server has 62GB RAM
-      // so memory is not a meaningful concern for this workload.
-      const runCmd = `cd ${tmpDir} && timeout 30 bash -c "ulimit -t 10; ${lang.run}"`;
+      // Build the run command in a single flat shell — no nested bash -c.
+      // The SSH exec already runs through /bin/sh, so shell features (&&, ulimit)
+      // are available directly. Nesting bash -c inside bash -c created a deep
+      // process chain that interfered with how the PTY's terminal modes propagated
+      // to the Java process, causing scanner.nextInt() to not block correctly.
+      //   ulimit -t 10  — 10 seconds CPU time; catches infinite loops
+      //   timeout 30    — wall-clock time limit; kills frozen programs
+      const runCmd = `ulimit -t 10 && cd ${tmpDir} && timeout 30 ${lang.run}`;
 
       console.log(`[RUN] user=${username} dir=${tmpDir}`);
 
-      // pty: true is what makes interactive programs work.
-      // Without it, stdin is not connected to a terminal and programs like
-      // Java's Scanner or C's scanf may not flush prompts to the screen.
-      conn.exec(runCmd, { pty: true }, (err, stream) => {
+      // Specify PTY options explicitly rather than using { pty: true } defaults.
+      // term: 'xterm-256color' — matches what xterm.js emulates, ensures the
+      //   program gets correct escape sequences and color support.
+      // cols/rows — reasonable defaults; keeps line wrapping correct for most programs.
+      // Setting these explicitly ensures canonical mode (line buffering, echo) is
+      // active, which is what Scanner/scanf/input() need to work interactively.
+      conn.exec(runCmd, { pty: { term: "xterm-256color", cols: 220, rows: 50 } }, (err, stream) => {
         if (err) {
           ws.send(`ERROR: Could not start program: ${err.message}\r\n`);
           ws.close();
