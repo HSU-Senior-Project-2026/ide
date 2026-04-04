@@ -232,12 +232,26 @@ export const FileManager = {
                     iconClass = "folder";
                     iconEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
                 } else {
-                    if (node.name.endsWith(".java")) iconClass = "file-java";
-                    else if (node.name.endsWith(".py")) iconClass = "file-py";
-                    else if (node.name.endsWith(".c") || node.name.endsWith(".cpp") || node.name.endsWith(".h")) iconClass = "file-c";
-                    else if (node.name.endsWith(".js")) iconClass = "file-js";
+                    let defaultSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
                     
-                    iconEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+                    if (node.name.endsWith(".java")) {
+                        iconClass = "file-java";
+                        iconEl.innerHTML = `<img src="https://cdn.simpleicons.org/java/ED8B00" width="14" height="14" style="vertical-align: middle;">`;
+                    } else if (node.name.endsWith(".py")) {
+                        iconClass = "file-py";
+                        iconEl.innerHTML = `<img src="https://cdn.simpleicons.org/python/3776ab" width="14" height="14" style="vertical-align: middle;">`;
+                    } else if (node.name.endsWith(".c") || node.name.endsWith(".h")) {
+                        iconClass = "file-c";
+                        iconEl.innerHTML = `<img src="https://cdn.simpleicons.org/c/A8B9CC" width="14" height="14" style="vertical-align: middle;">`;
+                    } else if (node.name.endsWith(".cpp") || node.name.endsWith(".hpp")) {
+                        iconClass = "file-cpp";
+                        iconEl.innerHTML = `<img src="https://cdn.simpleicons.org/cplusplus/00599c" width="14" height="14" style="vertical-align: middle;">`;
+                    } else if (node.name.endsWith(".js")) {
+                        iconClass = "file-js";
+                        iconEl.innerHTML = `<img src="https://cdn.simpleicons.org/javascript/f7df1e" width="14" height="14" style="vertical-align: middle;">`;
+                    } else {
+                        iconEl.innerHTML = defaultSvg;
+                    }
                 }
                 iconEl.className = "tree-item-icon " + iconClass;
                 
