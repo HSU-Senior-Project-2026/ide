@@ -377,23 +377,25 @@ function updateRunButtonState() {
     if (!$runBtn) return;
 
     const currentCode = sourceEditor ? sourceEditor.getValue().trim() : "";
-    const canRun = !!lastCompiledCode && currentCode === lastCompiledCode;
+    const languageId = getSelectedLanguageId();
+    const isInterpreted = INTERPRETED_LANGUAGE_IDS.includes(languageId);
+
+    const canRun = isInterpreted || (!!lastCompiledCode && currentCode === lastCompiledCode);
 
     $runBtn.prop("disabled", !canRun);
 
     if (canRun) {
-        $runBtn.removeClass("disabled");
-        $runBtn.addClass("primary");
+        $runBtn.removeClass("disabled").addClass("primary");
     } else {
-        $runBtn.addClass("disabled");
-        $runBtn.removeClass("primary");
+        $runBtn.addClass("disabled").removeClass("primary");
     }
 }
 
 function run() {
     const currentCode = sourceEditor.getValue().trim();
+    const isInterpreted = INTERPRETED_LANGUAGE_IDS.includes(getSelectedLanguageId());
 
-    if (!lastCompiledCode || currentCode !== lastCompiledCode) {
+    if (!isInterpreted && (!lastCompiledCode || currentCode !== lastCompiledCode)) {
         updateRunButtonState();
         return;
     }
@@ -1145,7 +1147,9 @@ document.addEventListener("DOMContentLoaded", async function () {
             var sidebarNewFileBtn = document.getElementById("sidebar-new-file");
             if (sidebarNewFileBtn) {
                 sidebarNewFileBtn.addEventListener("click", function () {
-                    document.getElementById("judge0-new-file-btn")?.click();
+                    $("#new-file-name").val("");
+                    $("#judge0-new-file-modal").modal({ closable: true }).modal("show");
+                    setTimeout(function () { document.getElementById("new-file-name").focus(); }, 100);
                 });
             }
 
@@ -1162,6 +1166,28 @@ document.addEventListener("DOMContentLoaded", async function () {
                     setTimeout(function () { refreshLayoutSize(); }, 200);
                 });
             }
+
+            // Activity bar: toggle sidebar
+            document.querySelectorAll(".activity-icon").forEach(function (icon) {
+                icon.addEventListener("click", function () {
+                    var panel = this.getAttribute("data-panel");
+                    var sidebar = document.getElementById("judge0-sidebar");
+
+                    if (this.classList.contains("active")) {
+                        // Collapse sidebar
+                        this.classList.remove("active");
+                        sidebar.classList.add("collapsed");
+                    } else {
+                        // Expand sidebar
+                        document.querySelectorAll(".activity-icon").forEach(function (i) { i.classList.remove("active"); });
+                        this.classList.add("active");
+                        sidebar.classList.remove("collapsed");
+                    }
+
+                    // Give Golden Layout time to notice the resize
+                    setTimeout(function () { refreshLayoutSize(); }, 200);
+                });
+            });
 
             setDefaults();
             refreshLayoutSize();
@@ -1270,27 +1296,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         document.getElementById("judge0-new-file-create-btn").click();
     });
 
-    // Activity bar: toggle sidebar
-    document.querySelectorAll(".activity-icon").forEach(function (icon) {
-        icon.addEventListener("click", function () {
-            var panel = this.getAttribute("data-panel");
-            var sidebar = document.getElementById("judge0-sidebar");
 
-            if (this.classList.contains("active")) {
-                // Collapse sidebar
-                this.classList.remove("active");
-                sidebar.classList.add("collapsed");
-            } else {
-                // Expand sidebar
-                document.querySelectorAll(".activity-icon").forEach(function (i) { i.classList.remove("active"); });
-                this.classList.add("active");
-                sidebar.classList.remove("collapsed");
-            }
-
-            // Give Golden Layout time to notice the resize
-            setTimeout(function () { refreshLayoutSize(); }, 200);
-        });
-    });
 
     window.onmessage = function (e) {
         if (!e.data) {
