@@ -177,8 +177,8 @@ wss.on("connection", (ws, req) => {
     return;
   }
 
-  if (mode !== "compile" && mode !== "run") {
-    ws.send("ERROR: Invalid mode. Must be 'compile' or 'run'.\r\n");
+  if (mode !== "compile" && mode !== "run" && mode !== "shell") {
+    ws.send("ERROR: Invalid mode. Must be 'compile', 'run', or 'shell'.\r\n");
     ws.close();
     return;
   }
@@ -366,6 +366,68 @@ wss.on("connection", (ws, req) => {
 
     conn.on("error", (err) => {
       console.log(`[RUN SSH ERROR] ${err.message}`);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(`SSH ERROR: ${err.message}\r\n`);
+        ws.close();
+      }
+    });
+
+    conn.connect({ host: "csci.hsutx.edu", port: 22, username, password, readyTimeout: 10000 });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SHELL MODE
+  // Opens a full interactive login shell on the CSCI server. The student can
+  // run any command — ls, git, vim, gcc, etc. — just like a normal SSH session.
+  // Data flows bidirectionally between xterm.js and the shell for the lifetime
+  // of the connection.
+  // ─────────────────────────────────────────────────────────────────────────
+  if (mode === "shell") {
+    const { username, password } = session;
+    const conn = new Client();
+
+    conn.on("ready", () => {
+      console.log(`[SHELL] user=${username}`);
+
+      conn.shell({ term: "xterm-256color", cols: 220, rows: 50 }, (err, stream) => {
+        if (err) {
+          ws.send(`ERROR: Could not open shell: ${err.message}\r\n`);
+          ws.close();
+          conn.end();
+          return;
+        }
+
+        // Shell → browser
+        stream.on("data", (data) => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(data.toString());
+        });
+
+        // Browser keystrokes → shell
+        ws.on("message", (data) => {
+          stream.write(data.toString());
+        });
+
+        // Shell exited (student typed "exit" or the connection dropped).
+        stream.on("close", () => {
+          console.log(`[SHELL CLOSED] user=${username}`);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send("\r\n[Shell session ended]\r\n");
+            ws.close();
+          }
+          conn.end();
+        });
+
+        // Browser disconnected — tear down the SSH connection.
+        ws.on("close", () => {
+          console.log(`[SHELL ABORTED] user=${username}`);
+          stream.close();
+          conn.end();
+        });
+      });
+    });
+
+    conn.on("error", (err) => {
+      console.log(`[SHELL SSH ERROR] ${err.message}`);
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(`SSH ERROR: ${err.message}\r\n`);
         ws.close();

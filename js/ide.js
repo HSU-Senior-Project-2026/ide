@@ -430,6 +430,65 @@ function run() {
     };
 }
 
+function openShell() {
+    const token = window.csciSessionToken;
+    if (!token) {
+        if (window.sshTerminal) {
+            window.sshTerminal.write("\r\nERROR: Not signed in. Please sign in to the CSCI server first.\r\n");
+        }
+        return;
+    }
+
+    // Switch to the terminal tab.
+    const termTab = layout.root.getItemsById("terminal")[0];
+    if (termTab && termTab.parent && termTab.parent.header && termTab.parent.header.parent) {
+        termTab.parent.header.parent.setActiveContentItem(termTab);
+    }
+
+    const term = window.sshTerminal;
+    if (!term) return;
+
+    // Close any existing connection (previous run or shell session).
+    if (activeTerminalWS) {
+        activeTerminalWS.close();
+        activeTerminalWS = null;
+    }
+
+    term.clear();
+    $statusLine.html("Opening shell...");
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=shell`;
+
+    const ws = new WebSocket(wsUrl);
+    activeTerminalWS = ws;
+
+    ws.onmessage = (event) => {
+        term.write(event.data);
+    };
+
+    const dataDisposable = term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(data);
+        }
+    });
+
+    ws.onopen = () => {
+        $statusLine.html("Shell connected.");
+    };
+
+    ws.onclose = () => {
+        dataDisposable.dispose();
+        activeTerminalWS = null;
+        $statusLine.html("Shell disconnected.");
+    };
+
+    ws.onerror = () => {
+        term.write("\r\nERROR: Lost connection to server.\r\n");
+        $statusLine.html("Connection error.");
+    };
+}
+
 function fetchSubmission(flavor, region, submission_token, iteration) {
     if (iteration >= MAX_PROBE_REQUESTS) {
         handleRunError({
@@ -724,6 +783,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     $runBtn.click(run);
     $clearBtn.click(clearIO);
     $compileBtn.click(compileOnly);
+    $("#shell-btn").click(openShell);
 
     $("#open-file-input").change(function (e) {
         const selectedFile = e.target.files[0];
