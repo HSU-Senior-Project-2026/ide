@@ -251,6 +251,10 @@ html, body {
     background: #094771;
 }
 
+.tree-item.active-folder {
+    background: rgba(255, 255, 255, 0.05);
+}
+
 .tree-item-indent {
     display: inline-block;
     width: 16px;
@@ -332,6 +336,7 @@ body.light-theme .sidebar-action-btn:hover { background: rgba(0, 0, 0, 0.06); co
 body.light-theme .tree-item { color: #333333; }
 body.light-theme .tree-item:hover { background: rgba(0, 0, 0, 0.04); }
 body.light-theme .tree-item.selected { background: #0060c0; color: #ffffff; }
+body.light-theme .tree-item.active-folder { background: rgba(0, 0, 0, 0.05); }
 body.light-theme .tree-item-arrow { color: #616161; }
 body.light-theme .sidebar-placeholder { color: #999999; }
 

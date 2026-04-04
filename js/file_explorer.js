@@ -2,6 +2,8 @@ export const FileManager = {
     tree: [], 
     activeFileId: null,
 
+    activeFolderId: null,
+
     init(callbacks) {
         this.callbacks = callbacks || {};
         this.loadWorkspace();
@@ -50,49 +52,100 @@ export const FileManager = {
     },
 
     createFile(name) {
-        const ext = name.split('.').pop() || "txt";
-        let defaultContent = "";
-        
-        // basic class template for java
-        if (ext === "java") {
-            const className = name.split('.')[0];
-            defaultContent = `public class ${className} {\n    public static void main(String[] args) {\n        \n    }\n}\n`;
-        } else if (ext === "c") {
-            defaultContent = `#include <stdio.h>\n\nint main() {\n    return 0;\n}\n`;
-        }
-
         const newNode = {
             id: this.generateId(),
             name: name,
             type: "file",
-            content: defaultContent
+            content: ""
         };
-        this.tree.push(newNode);
+        
+        let targetList = this.tree;
+        if (this.activeFolderId) {
+            const folder = this.findFile(this.activeFolderId, this.tree);
+            if (folder && folder.type === "folder") {
+                if (!folder.children) folder.children = [];
+                targetList = folder.children;
+                folder.isOpen = true; // Make sure the folder opens when a file is created inside it
+            }
+        }
+        
+        targetList.push(newNode);
         this.saveWorkspace();
         this.openFile(newNode.id);
     },
 
     createAndRenameFile() {
-        let baseName = "untitled.py";
+        let baseName = "untitled";
         let counter = "";
         let name = baseName;
-        let exists = (n) => this.tree.some(f => f.name === n);
         
-        while (exists(name)) {
+        let checkExists = (n, nodes) => nodes.some(f => f.name === n || (f.children && checkExists(n, f.children)));
+        
+        while (checkExists(name, this.tree)) {
             counter = (counter === "") ? 1 : counter + 1;
-            name = `untitled ${counter}.py`;
+            name = `${baseName} ${counter}`;
         }
         
         const newId = this.generateId();
-        this.tree.push({
+        const newNode = {
             id: newId,
             name: name,
             type: "file",
-            content: "def main():\n    pass\n\nif __name__ == \"__main__\":\n    main()\n"
-        });
+            content: ""
+        };
         
+        let targetList = this.tree;
+        if (this.activeFolderId) {
+            const folder = this.findFile(this.activeFolderId, this.tree);
+            if (folder && folder.type === "folder") {
+                if (!folder.children) folder.children = [];
+                targetList = folder.children;
+                folder.isOpen = true;
+            }
+        }
+        
+        targetList.push(newNode);
         this.saveWorkspace();
         this.openFile(newId);
+        
+        this.pendingRenameFileId = newId;
+        this.render();
+    },
+
+    createAndRenameFolder() {
+        let baseName = "untitled folder";
+        let counter = "";
+        let name = baseName;
+        
+        let checkExists = (n, nodes) => nodes.some(f => f.name === n || (f.children && checkExists(n, f.children)));
+        
+        while (checkExists(name, this.tree)) {
+            counter = (counter === "") ? 1 : counter + 1;
+            name = `${baseName} ${counter}`;
+        }
+        
+        const newId = this.generateId();
+        const newNode = {
+            id: newId,
+            name: name,
+            type: "folder",
+            isOpen: true,
+            children: []
+        };
+        
+        let targetList = this.tree;
+        if (this.activeFolderId) {
+            const folder = this.findFile(this.activeFolderId, this.tree);
+            if (folder && folder.type === "folder") {
+                if (!folder.children) folder.children = [];
+                targetList = folder.children;
+                folder.isOpen = true;
+            }
+        }
+        
+        targetList.push(newNode);
+        this.activeFolderId = newId; // instantly select the newly created folder
+        this.saveWorkspace();
         
         this.pendingRenameFileId = newId;
         this.render();
@@ -157,7 +210,12 @@ export const FileManager = {
 
             nodes.forEach(node => {
                 const el = document.createElement("div");
-                el.className = "tree-item" + (node.id === this.activeFileId ? " selected" : "");
+                let isSelectedFile = node.id === this.activeFileId;
+                let isActiveFolder = node.id === this.activeFolderId;
+                
+                el.className = "tree-item" + 
+                               (isSelectedFile ? " selected" : "") + 
+                               (isActiveFolder && !isSelectedFile ? " active-folder" : "");
                 el.style.paddingLeft = (8 + depth * 12) + "px";
                 
                 const arrowEl = document.createElement("div");
@@ -244,7 +302,7 @@ export const FileManager = {
                     
                     // VS Code specifies selecting the text without the extension by default, but selecting all is fine too
                     let dotIndex = node.name.lastIndexOf('.');
-                    if (dotIndex > 0) {
+                    if (dotIndex > 0 && node.type === "file") {
                         inputEl.setSelectionRange(0, dotIndex);
                     } else {
                         inputEl.select();
@@ -268,10 +326,14 @@ export const FileManager = {
                     e.stopPropagation();
                     if (node.type === "folder") {
                         node.isOpen = !node.isOpen;
+                        this.activeFolderId = node.id;
                         this.saveWorkspace();
                         this.render();
                     } else {
+                        // Inherit active folder from its parent if clicking a file
+                        this.activeFolderId = this.findParentFolderId(node.id, this.tree);
                         this.openFile(node.id);
+                        this.render(); // force re-render to update the active selected visual state
                     }
                 };
                 
@@ -311,5 +373,16 @@ export const FileManager = {
                 this.render();
             };
         }
+    },
+
+    findParentFolderId(id, nodes, parentId = null) {
+        for (let node of nodes) {
+            if (node.id === id) return parentId;
+            if (node.children) {
+                const found = this.findParentFolderId(id, node.children, node.id);
+                if (found) return found;
+            }
+        }
+        return null;
     }
 };

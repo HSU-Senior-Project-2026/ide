@@ -523,6 +523,7 @@ function updateSourceTabTitle() {
 
 function setSourceCodeName(name) {
   currentFileName = name;
+  selectLanguageForExtension(name.split(".").pop());
   updateSourceTabTitle();
 }
 
@@ -1148,6 +1149,14 @@ document.addEventListener("DOMContentLoaded", async function () {
             if (sidebarNewFileBtn) {
                 sidebarNewFileBtn.addEventListener("click", function () {
                     FileManager.createAndRenameFile();
+                });
+            }
+
+            // Handle new folder from sidebar
+            var sidebarNewFolderBtn = document.getElementById("sidebar-new-folder");
+            if (sidebarNewFolderBtn) {
+                sidebarNewFolderBtn.addEventListener("click", function () {
+                    FileManager.createAndRenameFolder();
                 });
             }
 
