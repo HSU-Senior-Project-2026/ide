@@ -28,20 +28,21 @@ const MAX_PROBE_REQUESTS = 600;
 
 var fontSize = 13;
 
-var layout;
+export var layout;
 
 // variables to track the current file name and unsaved changes
 var currentFileName = "Main.java";
 var hasUnsavedChanges = false;
 var isSaving = false;
-var sourceContainer = null;
-var suppressDirty = true;   // true while we are loading/setting initial content
+var suppressDirty = true;   // true while we are loading/setting content
 
 // For autosave functionality
 var autosaveTimer = null;
 var AUTOSAVE_MS = 5000; // 2–5 seconds (pick what you want)
 
 export var sourceEditor;
+export var sourceContainer;
+window.sourceEditors = {}; // Manages concurrent Monaco models
 var stdinEditor;
 var stdoutEditor;
 var compileOutEditor;
@@ -123,15 +124,19 @@ var layoutConfig = {
     content: [{
         type: configuration.get("appOptions.mainLayout"),
         content: [{
-            type: "component",
+            type: "stack",
             width: 66,
-            componentName: "source",
-            id: "source",
-            title: "Source Code",
-            isClosable: false,
-            componentState: {
-                readOnly: false
-            }
+            id: "sourceStack",
+            content: [{
+                type: "component",
+                componentName: "source",
+                id: "source",
+                title: "Source Code",
+                isClosable: false,
+                componentState: {
+                    readOnly: false
+                }
+            }]
         }, {
             type: configuration.get("appOptions.assistantLayout"),
             title: "AI Assistant and I/O",
@@ -613,7 +618,10 @@ async function saveAction() {
 }
 
 function setFontSizeForAllEditors(fontSize) {
-    if (sourceEditor) sourceEditor.updateOptions({ fontSize });
+    // Apply to all open source editor tabs
+    Object.values(window.sourceEditors).forEach(ed => {
+        if (ed) ed.updateOptions({ fontSize });
+    });
     if (stdinEditor) stdinEditor.updateOptions({ fontSize });
     if (stdoutEditor) stdoutEditor.updateOptions({ fontSize });
     if (compileOutEditor) compileOutEditor.updateOptions({ fontSize });
@@ -743,14 +751,8 @@ async function getLanguage(flavor, languageId) {
 function setDefaults() {
     setFontSizeForAllEditors(fontSize);
 
-    let initialFile = FileManager.getInitialFileContent();
-    if (initialFile) {
-        sourceEditor.setValue(initialFile.content);
-        // setSourceCodeName(initialFile.name); // This happens in openFile logic when clicked as well
-    } else {
-        sourceEditor.setValue(DEFAULT_SOURCE);
-        // setSourceCodeName("Main.java");
-    }
+    // Source editor content is now loaded by the source component itself.
+    // Just initialize the other editors.
 
     stdinEditor.setValue(DEFAULT_STDIN);
     $compilerOptions.val(DEFAULT_COMPILER_OPTIONS);
@@ -918,10 +920,11 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     require(["vs/editor/editor.main"], function (ignorable) {
         layout = new GoldenLayout(layoutConfig, $("#judge0-site-content"));
+        window.__ideModules = { layout: layout };
 
         layout.registerComponent("source", function (container, state) {
-            sourceContainer = container;
-            sourceEditor = monaco.editor.create(container.getElement()[0], {
+            
+            const editor = monaco.editor.create(container.getElement()[0], {
                 automaticLayout: true,
                 scrollBeyondLastLine: true,
                 readOnly: state.readOnly,
@@ -930,20 +933,16 @@ document.addEventListener("DOMContentLoaded", async function () {
                     enabled: true
                 },
 
-                // Auto-indent
                 autoIndent: "full",
                 formatOnType: true,
                 formatOnPaste: true,
 
-                // Auto-closing brackets and quotes
                 autoClosingBrackets: "always",
                 autoClosingQuotes: "always",
                 autoSurround: "languageDefined",
 
-                // Enable glyph margin for error indicators
                 glyphMargin: true,
 
-                // Disable autocomplete/suggestions
                 quickSuggestions: false,
                 suggestOnTriggerCharacters: false,
                 parameterHints: { enabled: false },
@@ -953,20 +952,74 @@ document.addEventListener("DOMContentLoaded", async function () {
                 snippetSuggestions: "none"
             });
 
+            // Set initial content if parsed dynamically via file_explorer open callbacks
+            if (state.initialContent !== undefined) {
+                editor.setValue(state.initialContent);
+            }
+
+            let fileId = state.fileId;
+            if (!fileId) {
+                // If it is the default first tab generated implicitly by Golden Layout's config tree
+                let initialFile = FileManager.getInitialFileContent();
+                if (initialFile) {
+                    fileId = initialFile.id;
+                    container.setTitle(initialFile.name);
+                    editor.setValue(initialFile.content);
+                    currentFileName = initialFile.name;
+                    selectLanguageForExtension(initialFile.name.split(".").pop());
+                } else {
+                    fileId = "default";
+                }
+                container._config.componentState = { fileId: fileId };
+                sourceEditor = editor;
+                sourceContainer = container;
+            }
+
+            window.sourceEditors[fileId] = editor;
+
+            container.on("show", () => {
+                sourceEditor = editor;
+                sourceContainer = container;
+
+                // Get the canonical file name from the VFS
+                let vfsFile = FileManager.findFile(fileId, FileManager.tree);
+                if (vfsFile) {
+                    currentFileName = vfsFile.name;
+                } else {
+                    currentFileName = container._config.title;
+                }
+                selectLanguageForExtension(currentFileName.split(".").pop());
+
+                // Sync sidebar selection
+                FileManager.activeFileId = fileId;
+                let parentId = FileManager.findParentFolderId(fileId, FileManager.tree);
+                if (parentId) {
+                    FileManager.activeFolderId = parentId;
+                }
+                FileManager.render();
+            });
+
+            container.on("destroy", () => {
+                delete window.sourceEditors[fileId];
+                editor.dispose();
+            });
+
             // Disable F1 command palette and right-click context menu
-            sourceEditor.addCommand(monaco.KeyCode.F1, function () {});
-            sourceEditor.updateOptions({ contextmenu: false });
+            editor.addCommand(monaco.KeyCode.F1, function () {});
+            editor.updateOptions({ contextmenu: false });
 
             // When the user types in the source editor, mark file as modified
-           sourceEditor.onDidChangeModelContent(function () {
+            editor.onDidChangeModelContent(function () {
                 if (suppressDirty) return;   // ignore changes caused by setValue/openFile/init
                 hasUnsavedChanges = true;
                 updateSourceTabTitle();
                 scheduleAutosave();         // schedule an autosave after user stops typing for a bit
 
                 // Persist source code to localStorage
-                try { localStorage.setItem("judge0.sourceCode", sourceEditor.getValue()); } catch (e) {}
-                try { FileManager.saveActiveFile(sourceEditor.getValue()); } catch (e) {}
+                try { localStorage.setItem("judge0.sourceCode", editor.getValue()); } catch (e) {}
+                if (fileId !== "default") {
+                    try { FileManager.saveActiveFile(editor.getValue()); } catch (e) {}
+                }
             });
 
              // After initial editor setup/content load finishes, mark file as clean and enable dirty tracking
@@ -976,13 +1029,13 @@ document.addEventListener("DOMContentLoaded", async function () {
                 updateSourceTabTitle();
             }, 0);
 
-            sourceEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
                 saveNow("manual");
             });
 
-            sourceEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
 
-            sourceEditor.onDidChangeModelContent(() => {
+            editor.onDidChangeModelContent(() => {
                 lastCompiledCode = null;
                 updateRunButtonState();
             });
@@ -1231,7 +1284,7 @@ document.addEventListener("DOMContentLoaded", async function () {
             // Apply saved font size and word wrap after editors exist
             setFontSizeForAllEditors(fontSize);
             var wrapSetting = localStorage.getItem("judge0.wordWrap") !== "off" ? "on" : "off";
-            if (sourceEditor) sourceEditor.updateOptions({ wordWrap: wrapSetting });
+            Object.values(window.sourceEditors).forEach(ed => { if (ed) ed.updateOptions({ wordWrap: wrapSetting }); });
             if (stdinEditor) stdinEditor.updateOptions({ wordWrap: wrapSetting });
             if (compileOutEditor) compileOutEditor.updateOptions({ wordWrap: wrapSetting });
             if (runOutEditor) runOutEditor.updateOptions({ wordWrap: wrapSetting });
@@ -1291,7 +1344,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     var $wordWrapBtn = document.getElementById("word-wrap-btn");
     function applyWordWrap() {
         var setting = wordWrapEnabled ? "on" : "off";
-        if (sourceEditor) sourceEditor.updateOptions({ wordWrap: setting });
+        Object.values(window.sourceEditors).forEach(ed => { if (ed) ed.updateOptions({ wordWrap: setting }); });
         if (stdinEditor) stdinEditor.updateOptions({ wordWrap: setting });
         if (compileOutEditor) compileOutEditor.updateOptions({ wordWrap: setting });
         if (runOutEditor) runOutEditor.updateOptions({ wordWrap: setting });

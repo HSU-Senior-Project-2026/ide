@@ -171,15 +171,59 @@ export const FileManager = {
     },
 
     openFile(id) {
-        if (this.activeFileId === id) return; // Prevent double-click wiping race condition
         const file = this.findFile(id, this.tree);
-        if (file) {
-            this.activeFileId = id;
-            if (this.callbacks.onOpenFile) {
-                this.callbacks.onOpenFile(file.content, file.name);
+        if (!file || file.type !== "file") return;
+
+        this.activeFileId = id;
+
+        // Check if a tab for this file is already open in the sourceStack
+        try {
+            const { layout } = window.__ideModules || {};
+            if (layout) {
+                const stacks = layout.root.getItemsById("sourceStack");
+                if (stacks.length > 0) {
+                    const stack = stacks[0];
+
+                    // Search existing tabs for this file ID
+                    let existingTab = null;
+                    for (let item of stack.contentItems) {
+                        if (item.config && item.config.componentState && item.config.componentState.fileId === id) {
+                            existingTab = item;
+                            break;
+                        }
+                    }
+
+                    if (existingTab) {
+                        // Tab already exists — just activate it
+                        stack.setActiveContentItem(existingTab);
+                    } else {
+                        // Create a new tab
+                        stack.addChild({
+                            type: "component",
+                            componentName: "source",
+                            title: file.name,
+                            isClosable: true,
+                            componentState: {
+                                readOnly: false,
+                                fileId: id,
+                                initialContent: file.content
+                            }
+                        });
+                    }
+
+                    this.render();
+                    return;
+                }
             }
-            this.render();
+        } catch (e) {
+            console.warn("Tab open fallback:", e);
         }
+
+        // Fallback: old single-editor approach
+        if (this.callbacks.onOpenFile) {
+            this.callbacks.onOpenFile(file.content, file.name);
+        }
+        this.render();
     },
 
     // Load initial code for ide.js setDefaults
@@ -187,7 +231,7 @@ export const FileManager = {
         const file = this.findFile(this.activeFileId, this.tree) || this.tree.find(n => n.type === "file");
         if (file) {
             this.activeFileId = file.id;
-            return { content: file.content, name: file.name };
+            return { id: file.id, content: file.content, name: file.name };
         }
         return null;
     },
@@ -236,7 +280,7 @@ export const FileManager = {
                     
                     if (node.name.endsWith(".java")) {
                         iconClass = "file-java";
-                        iconEl.innerHTML = `<img src="https://cdn.simpleicons.org/java/ED8B00" width="14" height="14" style="vertical-align: middle;">`;
+                        iconEl.innerHTML = `<img src="https://cdn.simpleicons.org/openjdk/ED8B00" width="14" height="14" style="vertical-align: middle;">`;
                     } else if (node.name.endsWith(".py")) {
                         iconClass = "file-py";
                         iconEl.innerHTML = `<img src="https://cdn.simpleicons.org/python/3776ab" width="14" height="14" style="vertical-align: middle;">`;
