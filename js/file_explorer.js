@@ -313,7 +313,7 @@ export const FileManager = {
                 renameEl.style.marginLeft = "auto";
                 renameEl.style.paddingLeft = "4px";
                 renameEl.title = "Rename";
-                
+
                 renameEl.onclick = (e) => {
                     e.stopPropagation();
                     const inputEl = document.createElement("input");
@@ -327,7 +327,7 @@ export const FileManager = {
                     inputEl.style.color = "inherit";
                     inputEl.style.outline = "none";
                     inputEl.style.padding = "0 2px";
-                    
+
                     const saveRename = () => {
                         const newName = inputEl.value;
                         if (newName && newName.trim() !== "" && newName !== node.name) {
@@ -339,7 +339,7 @@ export const FileManager = {
                         }
                         this.render();
                     };
-                    
+
                     inputEl.onblur = saveRename;
                     inputEl.onkeydown = (e) => {
                         if (e.key === "Enter") {
@@ -349,16 +349,15 @@ export const FileManager = {
                             inputEl.blur();
                         }
                     };
-                    
-                    // Hide rename icon while editing
+
                     renameEl.style.display = "none";
+                    deleteEl.style.display = "none";
                     el.onmouseenter = null;
                     el.onmouseleave = null;
-                    
+
                     el.replaceChild(inputEl, nameEl);
                     inputEl.focus();
-                    
-                    // VS Code specifies selecting the text without the extension by default, but selecting all is fine too
+
                     let dotIndex = node.name.lastIndexOf('.');
                     if (dotIndex > 0 && node.type === "file") {
                         inputEl.setSelectionRange(0, dotIndex);
@@ -367,13 +366,28 @@ export const FileManager = {
                     }
                 };
 
-                el.onmouseenter = () => renameEl.style.display = "block";
-                el.onmouseleave = () => renameEl.style.display = "none";
+                const deleteEl = document.createElement("div");
+                deleteEl.className = "tree-item-action";
+                deleteEl.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+                deleteEl.style.display = "none";
+                deleteEl.style.paddingLeft = "4px";
+                deleteEl.title = "Delete";
+
+                deleteEl.onclick = (e) => {
+                    e.stopPropagation();
+                    const label = node.type === "folder" ? `folder "${node.name}" and all its contents` : `"${node.name}"`;
+                    if (!confirm(`Delete ${label}?`)) return;
+                    this.deleteNode(node.id);
+                };
+
+                el.onmouseenter = () => { renameEl.style.display = "block"; deleteEl.style.display = "block"; };
+                el.onmouseleave = () => { renameEl.style.display = "none"; deleteEl.style.display = "none"; };
                 
                 el.appendChild(arrowEl);
                 el.appendChild(iconEl);
                 el.appendChild(nameEl);
                 el.appendChild(renameEl);
+                el.appendChild(deleteEl);
                 
                 if (this.pendingRenameFileId === node.id) {
                     this.pendingRenameFileId = null;
@@ -438,6 +452,93 @@ export const FileManager = {
             if (node.id === id) return parentId;
             if (node.children) {
                 const found = this.findParentFolderId(id, node.children, node.id);
+                if (found) return found;
+            }
+        }
+        return null;
+    },
+
+    // Collect all file IDs inside a node (recursively for folders)
+    collectFileIds(node) {
+        let ids = [];
+        if (node.type === "file") {
+            ids.push(node.id);
+        }
+        if (node.children) {
+            node.children.forEach(child => {
+                ids = ids.concat(this.collectFileIds(child));
+            });
+        }
+        return ids;
+    },
+
+    deleteNode(id) {
+        const node = this.findFile(id, this.tree);
+        if (!node) return;
+
+        // Collect all file IDs that will be removed (for closing tabs)
+        const fileIdsToClose = this.collectFileIds(node);
+
+        // Remove node from tree
+        const removeFromList = (nodes) => {
+            for (let i = 0; i < nodes.length; i++) {
+                if (nodes[i].id === id) {
+                    nodes.splice(i, 1);
+                    return true;
+                }
+                if (nodes[i].children && removeFromList(nodes[i].children)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        removeFromList(this.tree);
+        this.saveWorkspace();
+
+        // Close open tabs for deleted files in Golden Layout
+        try {
+            const { layout } = window.__ideModules || {};
+            if (layout) {
+                const stacks = layout.root.getItemsById("sourceStack");
+                if (stacks.length > 0) {
+                    const stack = stacks[0];
+                    // Iterate in reverse since we're removing items
+                    for (let i = stack.contentItems.length - 1; i >= 0; i--) {
+                        const item = stack.contentItems[i];
+                        const itemFileId = item.config && item.config.componentState && item.config.componentState.fileId;
+                        if (itemFileId && fileIdsToClose.includes(itemFileId)) {
+                            item.remove();
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn("Tab close on delete:", e);
+        }
+
+        // If the deleted node was the active file, switch to the first remaining file
+        if (fileIdsToClose.includes(this.activeFileId)) {
+            const firstFile = this.findFirstFile(this.tree);
+            if (firstFile) {
+                this.openFile(firstFile.id);
+            } else {
+                this.activeFileId = null;
+            }
+        }
+
+        // Clear active folder if it was deleted
+        if (this.activeFolderId === id) {
+            this.activeFolderId = null;
+        }
+
+        this.render();
+    },
+
+    findFirstFile(nodes) {
+        for (let node of nodes) {
+            if (node.type === "file") return node;
+            if (node.children) {
+                const found = this.findFirstFile(node.children);
                 if (found) return found;
             }
         }
