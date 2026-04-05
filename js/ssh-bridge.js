@@ -15,7 +15,7 @@ const JUDGE0_AUTH_TOKEN = "yjjcWNpQGFQMkpmHQasOKegTvGL8yZ1sI4WM7YYkCuVoUwYt";
 // The browser calls /judge0/languages → this strips /judge0 and forwards to localhost:2358/languages
 // The proxy injects the X-Auth-Token header so the browser never needs to know the key
 app.use("/judge0", createProxyMiddleware({
-  target: "http://localhost:2358",//"http://192.168.56.101:2358",
+  target: "http://35.153.133.130:2358",
   changeOrigin: true,
   pathRewrite: { "^/judge0": "" },
   on: {
@@ -53,13 +53,13 @@ app.post("/ssh-sign-in", (req, res) => {
     return res.json({ success: false, error: "Username or password missing" });
   }
 
-  console.log(`[SSH LOGIN ATTEMPT] From ${req.ip} → username: ${username}`);
+  console.log(`[SSH LOGIN ATTEMPT] From ${req.ip}`);
 
   const conn = new Client();
   let responded = false;
 
   conn.on("ready", () => {
-    console.log(`[SSH LOGIN SUCCESS] username: ${username}`);
+    console.log(`[SSH LOGIN SUCCESS]`);
     sshSession = conn; // keep the session active for sign-out
     if (!responded) {
       responded = true;
@@ -68,7 +68,7 @@ app.post("/ssh-sign-in", (req, res) => {
   });
 
   conn.on("error", (err) => {
-    console.log(`[SSH LOGIN FAILED] username: ${username} → ${err.message}`);
+    console.log(`[SSH LOGIN FAILED] ${err.message}`);
     if (!responded) {
       responded = true;
       res.json({ success: false, error: "SSH connection failed: " + err.message });
@@ -99,6 +99,86 @@ app.post("/ssh-sign-out", (req, res) => {
     }
   } else {
     return res.status(400).json({ success: false, message: "No active SSH session" });
+  }
+});
+
+// Helper: run a command on the active SSH session and return stdout
+function sshExec(command) {
+  return new Promise((resolve, reject) => {
+    if (!sshSession) return reject(new Error("No active SSH session"));
+
+    sshSession.exec(command, (err, stream) => {
+      if (err) return reject(err);
+
+      let stdout = "";
+      let stderr = "";
+
+      stream.on("data", (data) => { stdout += data.toString(); });
+      stream.stderr.on("data", (data) => { stderr += data.toString(); });
+      stream.on("close", (code) => {
+        if (code !== 0) return reject(new Error(stderr.trim() || `Exit code ${code}`));
+        resolve(stdout);
+      });
+    });
+  });
+}
+
+// List files and folders at a given path
+// Returns array of { name, type: "file"|"directory" }
+app.post("/ssh-ls", async (req, res) => {
+  const dir = req.body.path || "~";
+
+  try {
+    // ls -1F appends / to dirs, @ to symlinks, * to executables
+    const output = await sshExec(`ls -1aF ${JSON.stringify(dir)}`);
+    const entries = output.split("\n").filter(Boolean).map((entry) => {
+      if (entry === "./" || entry === "../") return null;
+
+      const isDir = entry.endsWith("/");
+      const name = entry.replace(/[/*@=|]$/, ""); // strip type indicators
+      return { name, type: isDir ? "directory" : "file" };
+    }).filter(Boolean);
+
+    res.json({ success: true, path: dir, entries });
+  } catch (err) {
+    console.error("[SSH-LS ERROR]", err.message);
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// Read a file's contents
+app.post("/ssh-read", async (req, res) => {
+  const filePath = req.body.path;
+
+  if (!filePath) {
+    return res.json({ success: false, error: "File path is required" });
+  }
+
+  try {
+    const content = await sshExec(`cat ${JSON.stringify(filePath)}`);
+    res.json({ success: true, path: filePath, content });
+  } catch (err) {
+    console.error("[SSH-READ ERROR]", err.message);
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// Write content to a file
+app.post("/ssh-write", async (req, res) => {
+  const { path: filePath, content } = req.body;
+
+  if (!filePath) {
+    return res.json({ success: false, error: "File path is required" });
+  }
+
+  try {
+    // Base64 encode to safely handle special characters and newlines
+    const encoded = Buffer.from(content || "").toString("base64");
+    await sshExec(`echo ${JSON.stringify(encoded)} | base64 -d > ${JSON.stringify(filePath)}`);
+    res.json({ success: true, path: filePath });
+  } catch (err) {
+    console.error("[SSH-WRITE ERROR]", err.message);
+    res.json({ success: false, error: err.message });
   }
 });
 

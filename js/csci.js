@@ -37,9 +37,16 @@ async function hideSignInModal() {
   $('#judge0-csci-sign-in-modal').modal('hide');
 }
 
-async function signIn() {
-  const username = document.getElementById("modal_username").value;
-  const password = document.getElementById("modal_password").value;
+async function signIn(e) {
+  if (e) e.preventDefault();
+
+  const usernameInput = document.getElementById("modal_username");
+  const passwordInput = document.getElementById("modal_password");
+  const username = usernameInput.value;
+  const password = passwordInput.value;
+
+  const $signInBtn = $("#judge0-csci-modal-sign-in-btn");
+  $signInBtn.addClass("loading disabled");
 
   try {
     const response = await fetch("/ssh-sign-in", {
@@ -47,19 +54,26 @@ async function signIn() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password })
     });
-
     const result = await response.json();
-    console.log("Server response:", result);
 
     if (result.success) {
+      // Clear credentials from DOM immediately after successful login
+      passwordInput.value = "";
       $('#judge0-csci-sign-in-modal').modal('hide');
       showNotification(`Connected to CSCI server as ${username}`, "success");
+      // Update account dropdown to show signed-in state
+      var displayName = username.split("@")[0] || "User";
+      document.getElementById("judge0-account-label").textContent = displayName;
+      document.getElementById("judge0-csci-sign-in-btn").style.display = "none";
+      document.getElementById("judge0-csci-sign-out-btn").style.display = "";
     } else {
       showNotification("Login failed: " + result.error, "error");
     }
   } catch (err) {
     console.error("Fetch error:", err);
     showNotification("Error connecting to server. See console for details.", "error");
+  } finally {
+    $signInBtn.removeClass("loading disabled");
   }
 }
 
@@ -89,11 +103,22 @@ async function signOut() {
   } finally {
     if (usernameInput) usernameInput.value = "";
     if (passwordInput) passwordInput.value = "";
+    // Reset account dropdown to signed-out state
+    document.getElementById("judge0-account-label").textContent = "Account";
+    document.getElementById("judge0-csci-sign-in-btn").style.display = "";
+    document.getElementById("judge0-csci-sign-out-btn").style.display = "none";
   }
 }
 
 document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("judge0-csci-sign-in-btn").addEventListener("click", showSignInModal);
+
+  // Prevent native form submission to keep credentials out of the URL
+  document.getElementById("judge0-csci-sign-in-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    signIn(e);
+  });
+
   document.getElementById("judge0-csci-modal-sign-in-btn").addEventListener("click", signIn);
   document.getElementById("judge0-csci-modal-sign-in-cancel-btn").addEventListener("click", hideSignInModal);
   document.getElementById("judge0-csci-sign-out-btn").addEventListener("click", signOut);
