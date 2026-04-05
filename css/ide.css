@@ -788,6 +788,120 @@ body.light-theme .settings-table .vim-mapping-delete:hover {
     background: rgba(211, 47, 47, 0.08);
 }
 
+/* ===== Welcome Screen ===== */
+.welcome-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 40px 20px;
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    color: #cccccc;
+    user-select: none;
+}
+
+.welcome-title {
+    font-size: 26px;
+    font-weight: 300;
+    margin: 0 0 8px;
+    color: #ffffff;
+}
+
+.welcome-subtitle {
+    font-size: 14px;
+    color: #858585;
+    margin: 0 0 32px;
+}
+
+.welcome-actions {
+    display: flex;
+    gap: 48px;
+}
+
+.welcome-section h3 {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #858585;
+    margin: 0 0 12px;
+}
+
+.welcome-link {
+    display: block;
+    background: none;
+    border: none;
+    color: #3794ff;
+    font-size: 13px;
+    padding: 4px 0;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+}
+
+.welcome-link:hover {
+    color: #4db8ff;
+    text-decoration: underline;
+}
+
+.welcome-shortcut {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #cccccc;
+    padding: 4px 0;
+}
+
+.welcome-key {
+    display: inline-block;
+    background: #3c3c3c;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #d4d4d4;
+    min-width: 60px;
+    text-align: center;
+}
+
+/* Light theme welcome */
+body.light-theme .welcome-screen {
+    color: #333333;
+}
+
+body.light-theme .welcome-title {
+    color: #1e1e1e;
+}
+
+body.light-theme .welcome-subtitle {
+    color: #777777;
+}
+
+body.light-theme .welcome-section h3 {
+    color: #777777;
+}
+
+body.light-theme .welcome-link {
+    color: #0066cc;
+}
+
+body.light-theme .welcome-link:hover {
+    color: #0078e6;
+}
+
+body.light-theme .welcome-shortcut {
+    color: #333333;
+}
+
+body.light-theme .welcome-key {
+    background: #e8e8e8;
+    border-color: #cccccc;
+    color: #333333;
+}
+
 /* ===== Editor area fills remaining space ===== */
 #judge0-site-content {
     flex: 1;

@@ -117,6 +117,31 @@ function highlightErrorLines(compileOutput) {
     errorDecorations = sourceEditor.deltaDecorations([], decorations);
 }
 
+// Decide initial tab: welcome screen if workspace is empty, otherwise first file
+var _savedWorkspace = null;
+try {
+    var _raw = localStorage.getItem("judge0.workspace");
+    if (_raw) _savedWorkspace = JSON.parse(_raw);
+} catch (e) {}
+var _hasFiles = _savedWorkspace && _savedWorkspace.length > 0 &&
+    _savedWorkspace.some(function (n) { return n.type === "file" || (n.children && n.children.length > 0); });
+
+var _initialTab = _hasFiles ? {
+    type: "component",
+    componentName: "source",
+    id: "source",
+    title: "Source Code",
+    isClosable: true,
+    componentState: { readOnly: false }
+} : {
+    type: "component",
+    componentName: "welcome",
+    id: "welcome",
+    title: "Welcome",
+    isClosable: true,
+    componentState: {}
+};
+
 var layoutConfig = {
     settings: {
         showPopoutIcon: false,
@@ -128,16 +153,7 @@ var layoutConfig = {
             type: "stack",
             width: 66,
             id: "sourceStack",
-            content: [{
-                type: "component",
-                componentName: "source",
-                id: "source",
-                title: "Source Code",
-                isClosable: false,
-                componentState: {
-                    readOnly: false
-                }
-            }]
+            content: [_initialTab]
         }, {
             type: configuration.get("appOptions.assistantLayout"),
             title: "AI Assistant and I/O",
@@ -305,6 +321,7 @@ function setCompileButtonLoading(loading) {
 }
 
 function compileOnly() {
+    if (!sourceEditor) return;
     const currentCode = sourceEditor.getValue().trim();
 
     if (currentCode === "") {
@@ -398,6 +415,7 @@ function updateRunButtonState() {
 }
 
 function run() {
+    if (!sourceEditor) return;
     const currentCode = sourceEditor.getValue().trim();
     const isInterpreted = INTERPRETED_LANGUAGE_IDS.includes(getSelectedLanguageId());
 
@@ -558,6 +576,7 @@ function newFile(filename) {
 }
 
 function openFile(content, filename) {
+    if (!sourceEditor) return;
     suppressDirty = true;                 // prevent dirty flag during load
     clear();
 
@@ -615,6 +634,7 @@ async function openAction() {
 }
 
 async function saveAction() {
+    if (!sourceEditor) return;
     saveFile(sourceEditor.getValue(), currentFileName);
 }
 
@@ -765,6 +785,7 @@ function setDefaults() {
 }
 
 function clear() {
+    if (!sourceEditor) return;
     sourceEditor.setValue("");
     stdinEditor.setValue("");
     $compilerOptions.val("");
@@ -913,7 +934,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                     break;
                 case "`":
                     e.preventDefault();
-                    sourceEditor.focus();
+                    if (sourceEditor) sourceEditor.focus();
                     break;
             }
         }
@@ -922,6 +943,41 @@ document.addEventListener("DOMContentLoaded", async function () {
     require(["vs/editor/editor.main"], function (ignorable) {
         layout = new GoldenLayout(layoutConfig, $("#judge0-site-content"));
         window.__ideModules = { layout: layout };
+
+        layout.registerComponent("welcome", function (container) {
+            var isMac = /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform);
+            var modKey = isMac ? "⌘" : "Ctrl";
+            var el = container.getElement()[0];
+            el.innerHTML = `
+                <div class="welcome-screen">
+                    <h1 class="welcome-title">Welcome</h1>
+                    <p class="welcome-subtitle">Get started by creating a file or opening an existing one.</p>
+                    <div class="welcome-actions">
+                        <div class="welcome-section">
+                            <h3>Start</h3>
+                            <button class="welcome-link" data-action="new-file">New File</button>
+                            <button class="welcome-link" data-action="new-folder">New Folder</button>
+                            <button class="welcome-link" data-action="open-file">Open File from Disk</button>
+                        </div>
+                        <div class="welcome-section">
+                            <h3>Help</h3>
+                            <div class="welcome-shortcut"><span class="welcome-key">${modKey}+Enter</span> Run Code</div>
+                            <div class="welcome-shortcut"><span class="welcome-key">${modKey}+S</span> Save File</div>
+                            <div class="welcome-shortcut"><span class="welcome-key">${modKey}+O</span> Open File</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            el.querySelector('[data-action="new-file"]').addEventListener("click", function () {
+                FileManager.createAndRenameFile();
+            });
+            el.querySelector('[data-action="new-folder"]').addEventListener("click", function () {
+                FileManager.createAndRenameFolder();
+            });
+            el.querySelector('[data-action="open-file"]').addEventListener("click", function () {
+                document.getElementById("judge0-open-file-btn")?.click();
+            });
+        });
 
         layout.registerComponent("source", function (container, state) {
             
@@ -1019,6 +1075,12 @@ document.addEventListener("DOMContentLoaded", async function () {
                 } catch(e) {}
                 delete window.sourceEditors[fileId];
                 editor.dispose();
+
+                // If this was the active editor, clear the reference
+                if (sourceEditor === editor) {
+                    sourceEditor = null;
+                    sourceContainer = null;
+                }
             });
 
             // Disable F1 command palette and right-click context menu
@@ -1474,7 +1536,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         if (e.data.action === "get") {
             window.top.postMessage(JSON.parse(JSON.stringify({
                 event: "getResponse",
-                source_code: sourceEditor.getValue(),
+                source_code: sourceEditor ? sourceEditor.getValue() : "",
                 language_id: getSelectedLanguageId(),
                 flavor: getSelectedLanguageFlavor(),
                 stdin: stdinEditor.getValue(),
@@ -1483,7 +1545,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 command_line_arguments: $commandLineArguments.val()
             })), "*");
         } else if (e.data.action === "set") {
-            if (e.data.source_code) {
+            if (e.data.source_code && sourceEditor) {
                 sourceEditor.setValue(e.data.source_code);
             }
             if (e.data.language_id && e.data.flavor) {

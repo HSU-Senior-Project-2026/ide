@@ -23,10 +23,10 @@ export const FileManager = {
             this.tree = this.getDefaultTree();
         }
         
-        if (!this.tree || this.tree.length === 0) {
-            this.tree = this.getDefaultTree();
+        if (!this.tree) {
+            this.tree = [];
         }
-        
+
         // Find first file to set as active initially if none selected
         if (!this.activeFileId && this.tree.length > 0) {
             const firstFile = this.tree.find(n => n.type === "file");
@@ -39,12 +39,7 @@ export const FileManager = {
     },
 
     getDefaultTree() {
-        return [{
-            id: this.generateId(),
-            name: "Main.java",
-            type: "file",
-            content: "public class Main {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}\n"
-        }];
+        return [];
     },
 
     generateId() {
@@ -242,7 +237,7 @@ export const FileManager = {
         container.innerHTML = "";
         
         if (this.tree.length === 0) {
-            container.innerHTML = '<div class="sidebar-placeholder">Empty workspace</div>';
+            container.innerHTML = '<div class="sidebar-placeholder">No files yet.<br>Use the <b>+</b> buttons above to create a file or folder.</div>';
             return;
         }
 
