@@ -109,9 +109,23 @@ html, body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding-top: 4px;
     border-right: 1px solid #1e1e1e;
     z-index: 100;
+}
+
+.activity-bar-top {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 4px;
+}
+
+.activity-bar-bottom {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: auto;
+    padding-bottom: 24px;
 }
 
 .activity-icon {
@@ -325,6 +339,453 @@ html, body {
 
 .tree-children.open {
     display: block;
+}
+
+/* ===== Settings Panel ===== */
+#judge0-settings-panel {
+    width: 450px;
+    min-width: 300px;
+    max-width: 600px;
+    background: #252526;
+    border-right: 1px solid #1e1e1e;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 99;
+}
+
+#settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    height: 35px;
+    min-height: 35px;
+    user-select: none;
+    border-bottom: 1px solid #1e1e1e;
+}
+
+#settings-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+#settings-categories {
+    width: 140px;
+    min-width: 140px;
+    border-right: 1px solid #1e1e1e;
+    padding-top: 8px;
+    overflow-y: auto;
+}
+
+.settings-category {
+    padding: 8px 16px;
+    font-size: 13px;
+    color: #858585;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s, background 0.15s;
+}
+
+.settings-category:hover {
+    color: #d4d4d4;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.settings-category.active {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.08);
+    border-left: 2px solid #007fd4;
+}
+
+#settings-content {
+    flex: 1;
+    padding: 16px 20px;
+    overflow-y: auto;
+}
+
+.settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.settings-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #cccccc;
+}
+
+.settings-sub-label {
+    font-weight: 400;
+    font-size: 12px;
+    color: #999999;
+    margin-top: 8px;
+}
+
+.settings-select {
+    background: #3c3c3c;
+    color: #cccccc;
+    border: 1px solid #555555;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 13px;
+    outline: none;
+    max-width: 200px;
+}
+
+.settings-select:focus {
+    border-color: #007fd4;
+}
+
+.settings-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Toggle switch */
+.settings-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.settings-toggle {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+}
+
+.settings-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.settings-toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #555555;
+    border-radius: 10px;
+    transition: background 0.2s;
+}
+
+.settings-toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background: #ffffff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.settings-toggle input:checked + .settings-toggle-slider {
+    background: #007fd4;
+}
+
+.settings-toggle input:checked + .settings-toggle-slider::before {
+    transform: translateX(16px);
+}
+
+.settings-toggle-label {
+    font-size: 12px;
+    color: #999999;
+}
+
+/* File upload area */
+.settings-upload-area {
+    margin-top: 4px;
+    padding: 12px;
+    background: #1e1e1e;
+    border-radius: 6px;
+}
+
+.settings-file-drop {
+    position: relative;
+    border: 1px dashed #555555;
+    border-radius: 4px;
+    padding: 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.settings-file-drop:hover {
+    border-color: #007fd4;
+}
+
+.settings-file-drop input[type="file"] {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.settings-file-drop-text {
+    font-size: 12px;
+    color: #858585;
+}
+
+.settings-file-name {
+    font-size: 11px;
+    color: #007fd4;
+    margin-top: 6px;
+    display: block;
+}
+
+.settings-placeholder {
+    color: #858585;
+    font-size: 13px;
+    padding: 12px 0;
+}
+
+.settings-hint {
+    font-size: 12px;
+    color: #858585;
+    margin: 0;
+    line-height: 1.4;
+}
+
+.settings-input {
+    background: #3c3c3c;
+    color: #cccccc;
+    border: 1px solid #555555;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 13px;
+    outline: none;
+    max-width: 120px;
+}
+
+.settings-input:focus {
+    border-color: #007fd4;
+}
+
+/* Key mappings table */
+.settings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.settings-table th {
+    text-align: left;
+    color: #858585;
+    font-weight: 600;
+    padding: 4px 6px 6px;
+    border-bottom: 1px solid #3c3c3c;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.settings-table td {
+    padding: 4px 6px;
+    vertical-align: middle;
+}
+
+.settings-table input[type="text"] {
+    background: #3c3c3c;
+    color: #cccccc;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    width: 100%;
+    min-width: 50px;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.settings-table input[type="text"]:focus {
+    border-color: #007fd4;
+}
+
+.settings-table select {
+    background: #3c3c3c;
+    color: #cccccc;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    padding: 4px 4px;
+    font-size: 12px;
+    outline: none;
+}
+
+.settings-table select:focus {
+    border-color: #007fd4;
+}
+
+.settings-table .vim-mapping-delete {
+    background: none;
+    border: none;
+    color: #858585;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.settings-table .vim-mapping-delete:hover {
+    color: #f44747;
+    background: rgba(244, 71, 71, 0.1);
+}
+
+.settings-btn {
+    background: #3c3c3c;
+    color: #cccccc;
+    border: 1px solid #555555;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.settings-btn:hover {
+    background: #4c4c4c;
+}
+
+/* Warning box */
+.settings-warning {
+    display: flex;
+    gap: 10px;
+    padding: 10px 12px;
+    background: rgba(255, 204, 0, 0.08);
+    border: 1px solid rgba(255, 204, 0, 0.25);
+    border-radius: 6px;
+    font-size: 12px;
+    color: #cccccc;
+}
+
+.settings-warning-icon {
+    font-size: 16px;
+    color: #ffcc00;
+    flex-shrink: 0;
+    line-height: 1.4;
+}
+
+.settings-warning strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+}
+
+.settings-warning .settings-hint {
+    margin: 0;
+}
+
+#vim-config-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    margin-top: 4px;
+}
+
+/* ===== Light theme: Settings Panel ===== */
+body.light-theme #judge0-settings-panel {
+    background: #f3f3f3;
+    border-right-color: #e0e0e0;
+}
+
+body.light-theme #settings-header {
+    border-bottom-color: #e0e0e0;
+}
+
+body.light-theme #settings-categories {
+    border-right-color: #e0e0e0;
+}
+
+body.light-theme .settings-category {
+    color: #616161;
+}
+
+body.light-theme .settings-category:hover {
+    color: #333333;
+    background: rgba(0, 0, 0, 0.04);
+}
+
+body.light-theme .settings-category.active {
+    color: #333333;
+    background: rgba(0, 0, 0, 0.06);
+}
+
+body.light-theme .settings-label {
+    color: #333333;
+}
+
+body.light-theme .settings-select {
+    background: #ffffff;
+    color: #333333;
+    border-color: #cccccc;
+}
+
+body.light-theme .settings-toggle-slider {
+    background: #cccccc;
+}
+
+body.light-theme .settings-placeholder {
+    color: #999999;
+}
+
+body.light-theme .settings-hint {
+    color: #777777;
+}
+
+body.light-theme .settings-input,
+body.light-theme .settings-table input[type="text"],
+body.light-theme .settings-table select {
+    background: #ffffff;
+    color: #333333;
+    border-color: #cccccc;
+}
+
+body.light-theme .settings-table th {
+    color: #777777;
+    border-bottom-color: #e0e0e0;
+}
+
+body.light-theme .settings-btn {
+    background: #e8e8e8;
+    color: #333333;
+    border-color: #cccccc;
+}
+
+body.light-theme .settings-btn:hover {
+    background: #dcdcdc;
+}
+
+body.light-theme .settings-warning {
+    background: rgba(180, 140, 0, 0.08);
+    border-color: rgba(180, 140, 0, 0.3);
+    color: #333333;
+}
+
+body.light-theme .settings-warning-icon {
+    color: #b48c00;
+}
+
+body.light-theme .settings-table .vim-mapping-delete {
+    color: #999999;
+}
+
+body.light-theme .settings-table .vim-mapping-delete:hover {
+    color: #d32f2f;
+    background: rgba(211, 47, 47, 0.08);
 }
 
 /* ===== Editor area fills remaining space ===== */

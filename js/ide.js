@@ -1,5 +1,6 @@
 import configuration from "./configuration.js";
 import { FileManager } from "./file_explorer.js";
+import * as Settings from "./settings.js";
 
 // API key and auth are handled server-side by the ssh-bridge proxy — not needed here
 const AUTH_HEADERS = {};
@@ -1273,21 +1274,34 @@ document.addEventListener("DOMContentLoaded", async function () {
                 });
             }
 
-            // Activity bar: toggle sidebar
+            // Initialize settings panel
+            Settings.init({ onRefreshLayout: refreshLayoutSize });
+
+            // Activity bar: toggle sidebar / settings
             document.querySelectorAll(".activity-icon").forEach(function (icon) {
                 icon.addEventListener("click", function () {
                     var panel = this.getAttribute("data-panel");
                     var sidebar = document.getElementById("judge0-sidebar");
 
                     if (this.classList.contains("active")) {
-                        // Collapse sidebar
+                        // Collapse current panel
                         this.classList.remove("active");
-                        sidebar.classList.add("collapsed");
+                        if (panel === "settings") {
+                            Settings.hide();
+                        } else {
+                            sidebar.classList.add("collapsed");
+                        }
                     } else {
-                        // Expand sidebar
+                        // Deactivate all icons
                         document.querySelectorAll(".activity-icon").forEach(function (i) { i.classList.remove("active"); });
                         this.classList.add("active");
-                        sidebar.classList.remove("collapsed");
+
+                        if (panel === "settings") {
+                            Settings.show();
+                        } else {
+                            Settings.hide();
+                            sidebar.classList.remove("collapsed");
+                        }
                     }
 
                     // Refresh immediately for a snappy UX
@@ -1349,6 +1363,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         reattach: function() {
             if (vimEnabled && MonacoVim) {
                 applyVimMode();
+                if (window.__vimSettingsApply) window.__vimSettingsApply();
             }
         },
         detach: function() {
@@ -1358,6 +1373,15 @@ document.addEventListener("DOMContentLoaded", async function () {
             }
             var statusBar = document.getElementById("vim-status-bar");
             if (statusBar) statusBar.innerHTML = "";
+        },
+        getVimAPI: function() {
+            if (MonacoVim && MonacoVim.VimMode) return MonacoVim.VimMode.Vim;
+            return null;
+        },
+        toggle: function(enabled) {
+            vimEnabled = enabled;
+            applyVimMode();
+            if (enabled && window.__vimSettingsApply) window.__vimSettingsApply();
         }
     };
 
@@ -1367,6 +1391,9 @@ document.addEventListener("DOMContentLoaded", async function () {
             vimEnabled = !vimEnabled;
             try { localStorage.setItem("judge0.vimMode", vimEnabled ? "on" : "off"); } catch (e) {}
             applyVimMode();
+            if (vimEnabled && window.__vimSettingsApply) window.__vimSettingsApply();
+            // Sync the settings panel toggle
+            Settings.syncToggle();
         });
     }
 
