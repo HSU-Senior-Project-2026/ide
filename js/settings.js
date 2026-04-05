@@ -24,7 +24,8 @@ var RESERVED_KEYS_WIN = [
     "F11 (Fullscreen)"
 ];
 
-// Load saved mappings from localStorage
+// ───── localStorage helpers ─────
+
 function loadMappings() {
     try {
         var raw = localStorage.getItem("judge0.vimMappings");
@@ -53,7 +54,90 @@ function saveEscTimeout(val) {
     } catch (e) {}
 }
 
-// Apply all saved vim settings via the vim helpers exposed by ide.js
+// ───── Server sync ─────
+
+var _saveTimer = null;
+
+// Gather all vim-related settings into one object
+function collectSettings() {
+    return {
+        vimEnabled: localStorage.getItem("judge0.vimMode") === "on",
+        vimEscTimeout: loadEscTimeout(),
+        vimMappings: loadMappings()
+    };
+}
+
+// Push settings to the server (debounced — waits 1s after last change)
+function saveToServerDebounced() {
+    if (_saveTimer) clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(function () {
+        _saveTimer = null;
+        var payload = collectSettings();
+        fetch("/user-settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "save", settings: payload })
+        }).catch(function (err) {
+            console.warn("[Settings] Server save failed:", err.message);
+        });
+    }, 1000);
+}
+
+// Called after any settings change — saves locally and queues a server push
+function onSettingsChanged() {
+    saveToServerDebounced();
+}
+
+// Pull settings from the server, merge into localStorage, and refresh the UI
+export function loadFromServer() {
+    return fetch("/user-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "load" })
+    })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+        if (!data.success || !data.settings) return;
+        var s = data.settings;
+
+        // Write server values into localStorage
+        if (typeof s.vimEnabled === "boolean") {
+            localStorage.setItem("judge0.vimMode", s.vimEnabled ? "on" : "off");
+        }
+        if (typeof s.vimEscTimeout === "number") {
+            localStorage.setItem("judge0.vimEscTimeout", String(s.vimEscTimeout));
+        }
+        if (Array.isArray(s.vimMappings)) {
+            localStorage.setItem("judge0.vimMappings", JSON.stringify(s.vimMappings));
+        }
+
+        // Refresh the settings UI to reflect loaded values
+        refreshUI();
+
+        // Re-apply vim settings if vim is active
+        var helpers = window.__vimHelpers;
+        if (helpers && helpers.toggle) {
+            var enabled = localStorage.getItem("judge0.vimMode") === "on";
+            helpers.toggle(enabled);
+        }
+
+        console.log("[Settings] Loaded user settings from server");
+    })
+    .catch(function (err) {
+        console.warn("[Settings] Server load failed:", err.message);
+    });
+}
+
+// Clear all vim-related localStorage keys (called on sign-out)
+export function clearLocal() {
+    localStorage.removeItem("judge0.vimMode");
+    localStorage.removeItem("judge0.vimMappings");
+    localStorage.removeItem("judge0.vimEscTimeout");
+    refreshUI();
+}
+
+// ───── Apply vim settings to the editor ─────
+
 function applyVimSettings() {
     var helpers = window.__vimHelpers;
     if (!helpers || !helpers.getVimAPI) return;
@@ -64,7 +148,7 @@ function applyVimSettings() {
     var timeout = loadEscTimeout();
     Vim.setOption("insertModeEscKeysTimeout", timeout);
 
-    // Clear previous custom mappings then re-apply
+    // Re-apply all custom mappings
     var mappings = loadMappings();
     mappings.forEach(function (m) {
         if (m.type === "noremap") {
@@ -75,7 +159,8 @@ function applyVimSettings() {
     });
 }
 
-// Build a mapping table row
+// ───── Mapping table UI ─────
+
 function createMappingRow(tbody, mapping) {
     var tr = document.createElement("tr");
 
@@ -124,6 +209,7 @@ function createMappingRow(tbody, mapping) {
         tr.remove();
         saveMappingsFromTable();
         applyVimSettings();
+        onSettingsChanged();
     });
     tdDel.appendChild(delBtn);
 
@@ -138,13 +224,13 @@ function createMappingRow(tbody, mapping) {
         el.addEventListener("change", function () {
             saveMappingsFromTable();
             applyVimSettings();
+            onSettingsChanged();
         });
     });
 
     tbody.appendChild(tr);
 }
 
-// Read current table state and persist
 function saveMappingsFromTable() {
     var tbody = document.getElementById("vim-keymaps-body");
     var rows = tbody.querySelectorAll("tr");
@@ -162,6 +248,45 @@ function saveMappingsFromTable() {
     });
     saveMappings(mappings);
 }
+
+// ───── Refresh UI from localStorage (after server load or sign-out) ─────
+
+function refreshUI() {
+    var vimToggle = document.getElementById("settings-vim-toggle");
+    var vimStatus = document.getElementById("vim-toggle-status");
+    var vimConfigSection = document.getElementById("vim-config-section");
+    var escTimeoutInput = document.getElementById("vim-esc-timeout");
+    var keymapsBody = document.getElementById("vim-keymaps-body");
+
+    var enabled = localStorage.getItem("judge0.vimMode") === "on";
+    if (vimToggle) vimToggle.checked = enabled;
+    if (vimStatus) vimStatus.textContent = enabled ? "On" : "Off";
+    if (vimConfigSection) {
+        if (enabled) {
+            vimConfigSection.classList.remove("judge0-hidden");
+        } else {
+            vimConfigSection.classList.add("judge0-hidden");
+        }
+    }
+    if (escTimeoutInput) escTimeoutInput.value = loadEscTimeout();
+
+    // Rebuild the mappings table
+    if (keymapsBody) {
+        keymapsBody.innerHTML = "";
+        loadMappings().forEach(function (m) {
+            createMappingRow(keymapsBody, m);
+        });
+    }
+
+    // Sync toolbar VIM button
+    var vimBtn = document.getElementById("vim-toggle-btn");
+    if (vimBtn) {
+        vimBtn.style.opacity = enabled ? "1" : "0.6";
+        vimBtn.style.color = enabled ? "#4ec9b0" : "";
+    }
+}
+
+// ───── Init ─────
 
 export function init({ onRefreshLayout }) {
     var closeBtn = document.getElementById("settings-close");
@@ -230,6 +355,8 @@ export function init({ onRefreshLayout }) {
         if (enabled) {
             applyVimSettings();
         }
+
+        onSettingsChanged();
     });
 
     // Escape timeout
@@ -241,6 +368,7 @@ export function init({ onRefreshLayout }) {
         this.value = val;
         saveEscTimeout(val);
         applyVimSettings();
+        onSettingsChanged();
     });
 
     // Load existing mappings into table
@@ -264,7 +392,6 @@ export function init({ onRefreshLayout }) {
 
     // Apply settings on init if vim is already active
     if (vimEnabled) {
-        // Delay slightly to let ide.js finish initializing vim
         setTimeout(applyVimSettings, 500);
     }
 
@@ -274,19 +401,8 @@ export function init({ onRefreshLayout }) {
 
 // Sync the settings toggle when vim is toggled from the toolbar button
 export function syncToggle() {
-    var vimToggle = document.getElementById("settings-vim-toggle");
-    var vimStatus = document.getElementById("vim-toggle-status");
-    var vimConfigSection = document.getElementById("vim-config-section");
-    var enabled = localStorage.getItem("judge0.vimMode") === "on";
-    if (vimToggle) vimToggle.checked = enabled;
-    if (vimStatus) vimStatus.textContent = enabled ? "On" : "Off";
-    if (vimConfigSection) {
-        if (enabled) {
-            vimConfigSection.classList.remove("judge0-hidden");
-        } else {
-            vimConfigSection.classList.add("judge0-hidden");
-        }
-    }
+    refreshUI();
+    onSettingsChanged();
 }
 
 export function show() {

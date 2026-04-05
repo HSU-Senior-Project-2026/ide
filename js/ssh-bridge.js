@@ -182,6 +182,38 @@ app.post("/ssh-write", async (req, res) => {
   }
 });
 
+// Per-user settings — stored as ~/.judge0-settings.json on the SSH server
+const SETTINGS_FILE = "~/.judge0-settings.json";
+
+app.post("/user-settings", async (req, res) => {
+  const { action, settings } = req.body;
+
+  if (!sshSession) {
+    return res.json({ success: false, error: "Not signed in" });
+  }
+
+  try {
+    if (action === "load") {
+      // Read the settings file; return empty object if it doesn't exist
+      const output = await sshExec(`cat ${SETTINGS_FILE} 2>/dev/null || echo "{}"`);
+      const parsed = JSON.parse(output.trim());
+      res.json({ success: true, settings: parsed });
+    } else if (action === "save") {
+      if (!settings || typeof settings !== "object") {
+        return res.json({ success: false, error: "Invalid settings payload" });
+      }
+      const encoded = Buffer.from(JSON.stringify(settings, null, 2)).toString("base64");
+      await sshExec(`echo ${JSON.stringify(encoded)} | base64 -d > ${SETTINGS_FILE}`);
+      res.json({ success: true });
+    } else {
+      res.json({ success: false, error: "Unknown action. Use 'load' or 'save'." });
+    }
+  } catch (err) {
+    console.error("[USER-SETTINGS ERROR]", err.message);
+    res.json({ success: false, error: err.message });
+  }
+});
+
 // Start HTTP server on port 80
 http.createServer(app).listen(3000, "127.0.0.1", () => {
   console.log("Server running on http://localhost:3000");

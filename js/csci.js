@@ -1,3 +1,4 @@
+import { loadFromServer, clearLocal } from "./settings.js";
 
 //--------------------------------------------------
 
@@ -66,6 +67,8 @@ async function signIn(e) {
       document.getElementById("judge0-account-label").textContent = displayName;
       document.getElementById("judge0-csci-sign-in-btn").style.display = "none";
       document.getElementById("judge0-csci-sign-out-btn").style.display = "";
+      // Load user's settings from their home directory on the server
+      loadFromServer();
     } else {
       showNotification("Login failed: " + result.error, "error");
     }
@@ -103,6 +106,8 @@ async function signOut() {
   } finally {
     if (usernameInput) usernameInput.value = "";
     if (passwordInput) passwordInput.value = "";
+    // Clear per-user settings from localStorage
+    clearLocal();
     // Reset account dropdown to signed-out state
     document.getElementById("judge0-account-label").textContent = "Account";
     document.getElementById("judge0-csci-sign-in-btn").style.display = "";
