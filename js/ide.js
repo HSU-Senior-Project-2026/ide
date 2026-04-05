@@ -1,24 +1,23 @@
-import { usePuter } from "./puter.js";
 import configuration from "./configuration.js";
+import { FileManager } from "./file_explorer.js";
+import * as Settings from "./settings.js";
 
-const API_KEY = "";
-
-const AUTH_HEADERS = API_KEY ? {
-    "Authorization": `Bearer ${API_KEY}`
-} : {};
+// API key and auth are handled server-side by the ssh-bridge proxy — not needed here
+const AUTH_HEADERS = {};
 
 const CE = "CE";
 const EXTRA_CE = "EXTRA_CE";
 
-const AUTHENTICATED_CE_BASE_URL = "https://ce.judge0.com";
-const AUTHENTICATED_EXTRA_CE_BASE_URL = "https://extra-ce.judge0.com";
+// Relative URL: browser calls /judge0/... on port 80, proxy forwards to localhost:2358
+const AUTHENTICATED_CE_BASE_URL = "/judge0";
+const AUTHENTICATED_EXTRA_CE_BASE_URL = "/judge0";
 
 var AUTHENTICATED_BASE_URL = {};
 AUTHENTICATED_BASE_URL[CE] = AUTHENTICATED_CE_BASE_URL;
 AUTHENTICATED_BASE_URL[EXTRA_CE] = AUTHENTICATED_EXTRA_CE_BASE_URL;
 
-const UNAUTHENTICATED_CE_BASE_URL = "https://ce.judge0.com";
-const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "https://extra-ce.judge0.com";
+const UNAUTHENTICATED_CE_BASE_URL = "/judge0";
+const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "/judge0";
 
 var UNAUTHENTICATED_BASE_URL = {};
 UNAUTHENTICATED_BASE_URL[CE] = UNAUTHENTICATED_CE_BASE_URL;
@@ -30,20 +29,21 @@ const MAX_PROBE_REQUESTS = 600;
 
 var fontSize = 13;
 
-var layout;
+export var layout;
 
 // variables to track the current file name and unsaved changes
 var currentFileName = "Main.java";
 var hasUnsavedChanges = false;
 var isSaving = false;
-var sourceContainer = null;
-var suppressDirty = true;   // true while we are loading/setting initial content
+var suppressDirty = true;   // true while we are loading/setting content
 
 // For autosave functionality
 var autosaveTimer = null;
 var AUTOSAVE_MS = 5000; // 2–5 seconds (pick what you want)
 
 export var sourceEditor;
+export var sourceContainer;
+window.sourceEditors = {}; // Manages concurrent Monaco models
 var stdinEditor;
 var stdoutEditor;
 var compileOutEditor;
@@ -56,13 +56,91 @@ var $runBtn;
 var $clearBtn;
 var $statusLine;
 var $compileBtn;
-var lastCompiledCode=null;
-
+var lastCompiledCode = null;
 
 var timeStart;
 
 var sqliteAdditionalFiles;
 var languages = {};
+
+// Error line highlighting decorations
+var errorDecorations = [];
+
+function clearErrorHighlights() {
+    if (sourceEditor && errorDecorations.length) {
+        errorDecorations = sourceEditor.deltaDecorations(errorDecorations, []);
+    }
+}
+
+function highlightErrorLines(compileOutput) {
+    clearErrorHighlights();
+    if (!sourceEditor || !compileOutput) return;
+
+    var lineNumbers = [];
+    // Java: Main.java:5: error: ...
+    // C/GCC: main.c:12:5: error: ...  or  main.c:12:5: warning: ...
+    // Python: File "main.py", line 3
+    var patterns = [
+        /\.(?:java|c|cpp|h):(\d+)/g,              // Java / C / C++
+        /File\s+"[^"]+",\s+line\s+(\d+)/g,        // Python
+        /^(\d+)\s*\|/gm,                           // GCC caret-style output
+        /error.*?:(\d+):/g                         // generic fallback
+    ];
+
+    patterns.forEach(function (regex) {
+        var match;
+        while ((match = regex.exec(compileOutput)) !== null) {
+            var lineNum = parseInt(match[1]);
+            if (lineNum > 0 && lineNumbers.indexOf(lineNum) === -1) {
+                lineNumbers.push(lineNum);
+            }
+        }
+    });
+
+    if (lineNumbers.length === 0) return;
+
+    var decorations = lineNumbers.map(function (line) {
+        return {
+            range: new monaco.Range(line, 1, line, 1),
+            options: {
+                isWholeLine: true,
+                className: "judge0-error-line",
+                glyphMarginClassName: "judge0-error-glyph",
+                overviewRuler: {
+                    color: "#ff0000",
+                    position: monaco.editor.OverviewRulerLane.Full
+                }
+            }
+        };
+    });
+
+    errorDecorations = sourceEditor.deltaDecorations([], decorations);
+}
+
+// Decide initial tab: welcome screen if workspace is empty, otherwise first file
+var _savedWorkspace = null;
+try {
+    var _raw = localStorage.getItem("judge0.workspace");
+    if (_raw) _savedWorkspace = JSON.parse(_raw);
+} catch (e) {}
+var _hasFiles = _savedWorkspace && _savedWorkspace.length > 0 &&
+    _savedWorkspace.some(function (n) { return n.type === "file" || (n.children && n.children.length > 0); });
+
+var _initialTab = _hasFiles ? {
+    type: "component",
+    componentName: "source",
+    id: "source",
+    title: "Source Code",
+    isClosable: true,
+    componentState: { readOnly: false }
+} : {
+    type: "component",
+    componentName: "welcome",
+    id: "welcome",
+    title: "Welcome",
+    isClosable: true,
+    componentState: {}
+};
 
 var layoutConfig = {
     settings: {
@@ -72,29 +150,14 @@ var layoutConfig = {
     content: [{
         type: configuration.get("appOptions.mainLayout"),
         content: [{
-            type: "component",
+            type: "stack",
             width: 66,
-            componentName: "source",
-            id: "source",
-            title: "Source Code",
-            isClosable: false,
-            componentState: {
-                readOnly: false
-            }
+            id: "sourceStack",
+            content: [_initialTab]
         }, {
             type: configuration.get("appOptions.assistantLayout"),
             title: "AI Assistant and I/O",
-            content: [configuration.get("appOptions.showAIAssistant") ? {
-                type: "component",
-                height: 66,
-                componentName: "ai",
-                id: "ai",
-                title: "AI Assistant",
-                isClosable: false,
-                componentState: {
-                    readOnly: false
-                }
-            } : null, {
+            content: [{
                 type: configuration.get("appOptions.ioLayout"),
                 title: "I/O",
                 content: [
@@ -132,7 +195,7 @@ var layoutConfig = {
     }]
 };
 
-var gPuterFile;
+
 
 function encode(str) {
     return btoa(unescape(encodeURIComponent(str || "")));
@@ -151,7 +214,7 @@ function showError(title, content) {
     $("#judge0-site-modal #title").html(title);
     $("#judge0-site-modal .content").html(content);
 
-    let reportTitle = encodeURIComponent(`Error on ${window.location.href}`);
+    let FTitle = encodeURIComponent(`Error on ${window.location.href}`);
     let reportBody = encodeURIComponent(
         `**Error Title**: ${title}\n` +
         `**Error Timestamp**: \`${new Date()}\`\n` +
@@ -159,7 +222,7 @@ function showError(title, content) {
         `**Description**:\n${content}`
     );
 
-    $("#report-problem-btn").attr("href", `https://github.com/judge0/ide/issues/new?title=${reportTitle}&body=${reportBody}`);
+    $("#report-problem-btn").attr("href", `https://github.com/judge0/ide/issues/new?title=${FTitle}&body=${reportBody}`);
     $("#judge0-site-modal").modal("show");
 }
 
@@ -190,11 +253,11 @@ function handleResult(data) {
 
     $statusLine.html(`${status.description}, ${time}, ${memory} (TAT: ${tat}ms)`);
 
-    /*const output = [compileOutput, stdout].filter(x => x).join("\n").trimEnd();
-    stdoutEditor.setValue(output);*/
-    
     const runtimeOutput = [stdout, stderr].filter(x => x).join("\n").trimEnd();
     const compileText = (compileOutput || "").trimEnd();
+
+    // Highlight error lines from compiler output or runtime errors
+    highlightErrorLines(compileOutput || stderr);
 
     // Compile tab: show compiler output or a friendly success message
     if (compileOutEditor) {
@@ -247,7 +310,18 @@ function getSelectedLanguageFlavor() {
     return $selectLanguage.find(":selected").attr("flavor");
 }
 
+function setCompileButtonLoading(loading) {
+    if (loading) {
+        $compileBtn.addClass("loading disabled");
+        $compileBtn.find(".compile-icon").removeClass().addClass("compile-icon spinner loading icon");
+    } else {
+        $compileBtn.removeClass("loading disabled");
+        $compileBtn.find(".compile-icon").removeClass().addClass("compile-icon");
+    }
+}
+
 function compileOnly() {
+    if (!sourceEditor) return;
     const currentCode = sourceEditor.getValue().trim();
 
     if (currentCode === "") {
@@ -266,7 +340,7 @@ function compileOnly() {
     $statusLine.html("Compiling...");
     // Switch to Compile tab when compiling
     const compileTab = layout.root.getItemsById("compileOut")[0];
-    if (compileTab && compileTab.parent && compileTab.parent.header && compileTab.parent.header.parent) {
+    if (compileTab) {
         compileTab.parent.header.parent.setActiveContentItem(compileTab);
     }
 
@@ -280,6 +354,8 @@ function compileOnly() {
         stdin: encode(""),
         redirect_stderr_to_stdout: false
     };
+
+    clearErrorHighlights();
 
     $.ajax({
         url: `${AUTHENTICATED_BASE_URL[flavor]}/submissions?base64_encoded=true&wait=true`,
@@ -300,6 +376,7 @@ function compileOnly() {
                 runOutEditor.setValue("");
             }
 
+            highlightErrorLines(compileOutput);
             $statusLine.html(data.status.description);
 
             // success only when there is no compile output
@@ -323,28 +400,31 @@ function updateRunButtonState() {
     if (!$runBtn) return;
 
     const currentCode = sourceEditor ? sourceEditor.getValue().trim() : "";
-    const canRun = !!lastCompiledCode && currentCode === lastCompiledCode;
+    const languageId = getSelectedLanguageId();
+    const isInterpreted = INTERPRETED_LANGUAGE_IDS.includes(languageId);
+
+    const canRun = isInterpreted || (!!lastCompiledCode && currentCode === lastCompiledCode);
 
     $runBtn.prop("disabled", !canRun);
 
     if (canRun) {
-        $runBtn.removeClass("disabled");
-        $runBtn.addClass("primary");
+        $runBtn.removeClass("disabled").addClass("primary");
     } else {
-        $runBtn.addClass("disabled");
-        $runBtn.removeClass("primary");
+        $runBtn.addClass("disabled").removeClass("primary");
     }
 }
 
 function run() {
+    if (!sourceEditor) return;
     const currentCode = sourceEditor.getValue().trim();
+    const isInterpreted = INTERPRETED_LANGUAGE_IDS.includes(getSelectedLanguageId());
 
-    if (!lastCompiledCode || currentCode !== lastCompiledCode) {
+    if (!isInterpreted && (!lastCompiledCode || currentCode !== lastCompiledCode)) {
         updateRunButtonState();
         return;
     }
 
-    $runBtn.addClass("loading"); 
+    $runBtn.addClass("loading");
 
     //stdoutEditor.setValue("");
     if (compileOutEditor) compileOutEditor.setValue("");
@@ -467,6 +547,7 @@ function updateSourceTabTitle() {
 
 function setSourceCodeName(name) {
   currentFileName = name;
+  selectLanguageForExtension(name.split(".").pop());
   updateSourceTabTitle();
 }
 
@@ -478,10 +559,27 @@ function setSourceCodeName(name) {
     return $(".lm_title")[0].innerText;
 }*/
 
+function newFile(filename) {
+    clear();
+    suppressDirty = true;
+    sourceEditor.setValue("");
+    suppressDirty = false;
+
+    selectLanguageForExtension(filename.split(".").pop());
+    setSourceCodeName(filename);
+
+    hasUnsavedChanges = false;
+    updateSourceTabTitle();
+
+    // Clear saved source so refresh starts fresh with the new file
+    try { localStorage.removeItem("judge0.sourceCode"); } catch (e) {}
+}
+
 function openFile(content, filename) {
+    if (!sourceEditor) return;
+    suppressDirty = true;                 // prevent dirty flag during load
     clear();
 
-    suppressDirty = true;                 // prevent dirty flag during load
     sourceEditor.setValue(content);
     suppressDirty = false;                // now allow user edits to mark dirty
 
@@ -502,6 +600,7 @@ function saveNow(reason) {
 
   // MVP: save to localStorage (silent autosave)
   localStorage.setItem("autosave:" + currentFileName, content);
+  FileManager.saveActiveFile(content);
 
   isSaving = false;
   hasUnsavedChanges = false;
@@ -531,29 +630,19 @@ function saveFile(content, filename) {
 }
 
 async function openAction() {
-    if (usePuter()) {
-        gPuterFile = await puter.ui.showOpenFilePicker();
-        openFile(await (await gPuterFile.read()).text(), gPuterFile.name);
-    } else {
-        document.getElementById("open-file-input").click();
-    }
+    document.getElementById("open-file-input").click();
 }
 
 async function saveAction() {
-    if (usePuter()) {
-        if (gPuterFile) {
-            gPuterFile.write(sourceEditor.getValue());
-        } else {
-            gPuterFile = await puter.ui.showSaveFilePicker(sourceEditor.getValue(), getSourceCodeName());
-            setSourceCodeName(gPuterFile.name);
-        }
-    } else {
-        saveFile(sourceEditor.getValue(), getSourceCodeName());
-    }
+    if (!sourceEditor) return;
+    saveFile(sourceEditor.getValue(), currentFileName);
 }
 
 function setFontSizeForAllEditors(fontSize) {
-    if (sourceEditor) sourceEditor.updateOptions({ fontSize });
+    // Apply to all open source editor tabs
+    Object.values(window.sourceEditors).forEach(ed => {
+        if (ed) ed.updateOptions({ fontSize });
+    });
     if (stdinEditor) stdinEditor.updateOptions({ fontSize });
     if (stdoutEditor) stdoutEditor.updateOptions({ fontSize });
     if (compileOutEditor) compileOutEditor.updateOptions({ fontSize });
@@ -561,6 +650,10 @@ function setFontSizeForAllEditors(fontSize) {
 }
 
 async function loadLangauges() {
+    // Only allow Java, C, and Python from available backend languages
+    var ALLOWED_CE_LANGUAGES = [62, 50, 71];     // Java (OpenJDK 13.0.1), C (GCC 9.2.0), Python (3.8.1)
+    var ALLOWED_EXTRA_CE_LANGUAGES = [];
+
     return new Promise((resolve, reject) => {
         let options = [];
 
@@ -569,13 +662,17 @@ async function loadLangauges() {
             success: function (data) {
                 for (let i = 0; i < data.length; i++) {
                     let language = data[i];
+                    // Only add allowed CE languages
+                    if (!ALLOWED_CE_LANGUAGES.includes(language.id)) {
+                        continue;
+                    }
                     let option = new Option(language.name, language.id);
                     option.setAttribute("flavor", CE);
                     option.setAttribute("langauge_mode", getEditorLanguageMode(language.name));
 
-                    if (language.id !== 89) {
+                    //if (language.id !== 89) {
                         options.push(option);
-                    }
+                    //}
 
                     if (language.id === DEFAULT_LANGUAGE_ID) {
                         option.selected = true;
@@ -589,13 +686,17 @@ async function loadLangauges() {
                 success: function (data) {
                     for (let i = 0; i < data.length; i++) {
                         let language = data[i];
+                        // Only add allowed Extra CE languages
+                        if (!ALLOWED_EXTRA_CE_LANGUAGES.includes(language.id)) {
+                            continue;
+                        }
                         let option = new Option(language.name, language.id);
                         option.setAttribute("flavor", EXTRA_CE);
                         option.setAttribute("langauge_mode", getEditorLanguageMode(language.name));
 
-                        if (options.findIndex((t) => (t.text === option.text)) === -1 && language.id !== 89) {
+                        //if (options.findIndex((t) => (t.text === option.text)) === -1 && language.id !== 89) {
                             options.push(option);
-                        }
+                        //}
                     }
                 },
                 error: reject
@@ -609,6 +710,18 @@ async function loadLangauges() {
     });
 };
 
+// Languages that are interpreted and do not need a separate compile step
+const INTERPRETED_LANGUAGE_IDS = [71]; // Python (3.8.1)
+
+function updateCompileButtonVisibility() {
+    let languageId = getSelectedLanguageId();
+    if (INTERPRETED_LANGUAGE_IDS.includes(languageId)) {
+        $compileBtn.hide();
+    } else {
+        $compileBtn.show();
+    }
+}
+
 async function loadSelectedLanguage(skipSetDefaultSourceCodeName = false) {
     if (!sourceEditor) {
         console.warn("Editor not initialized yet");
@@ -618,6 +731,7 @@ async function loadSelectedLanguage(skipSetDefaultSourceCodeName = false) {
     if (!skipSetDefaultSourceCodeName) {
         setSourceCodeName((await getSelectedLanguage()).source_file);
     }
+    updateCompileButtonVisibility();
 }
 
 function selectLanguageByFlavorAndId(languageId, flavor) {
@@ -657,7 +771,10 @@ async function getLanguage(flavor, languageId) {
 
 function setDefaults() {
     setFontSizeForAllEditors(fontSize);
-    sourceEditor.setValue(DEFAULT_SOURCE);
+
+    // Source editor content is now loaded by the source component itself.
+    // Just initialize the other editors.
+
     stdinEditor.setValue(DEFAULT_STDIN);
     $compilerOptions.val(DEFAULT_COMPILER_OPTIONS);
     $commandLineArguments.val(DEFAULT_CMD_ARGUMENTS);
@@ -668,20 +785,26 @@ function setDefaults() {
 }
 
 function clear() {
+    if (!sourceEditor) return;
     sourceEditor.setValue("");
     stdinEditor.setValue("");
     $compilerOptions.val("");
     $commandLineArguments.val("");
 
     $statusLine.html("");
+
+    // Clear saved source code from localStorage
+    try { localStorage.removeItem("judge0.sourceCode"); } catch (e) {}
 }
 
 function refreshSiteContentHeight() {
     const navigationHeight = document.getElementById("judge0-site-navigation").offsetHeight;
 
+    const wrapper = document.getElementById("judge0-site-wrapper");
+    wrapper.style.top = `${navigationHeight}px`;
+
     const siteContent = document.getElementById("judge0-site-content");
-    siteContent.style.height = `${window.innerHeight}px`;
-    siteContent.style.paddingTop = `${navigationHeight}px`;
+    siteContent.style.height = `${window.innerHeight - navigationHeight}px`;
 }
 
 function refreshLayoutSize() {
@@ -704,13 +827,26 @@ document.addEventListener("DOMContentLoaded", async function () {
     $selectLanguage.change(function (event, data) {
         let skipSetDefaultSourceCodeName = (data && data.skipSetDefaultSourceCodeName) || !!gPuterFile;
         loadSelectedLanguage(skipSetDefaultSourceCodeName);
+
+        // Persist selected language to localStorage
+        try {
+            localStorage.setItem("judge0.languageId", getSelectedLanguageId());
+            localStorage.setItem("judge0.languageFlavor", getSelectedLanguageFlavor());
+        } catch (e) {}
     });
 
     await loadLangauges();
-    // Default editor language for MVP
-    const JAVA_ID = "91"; // replace after you confirm
-    $selectLanguage.parent(".ui.dropdown").dropdown("set selected", JAVA_ID);
-    loadSelectedLanguage(true); // ensure Monaco updates; true avoids filename reset
+
+    // Restore saved language or default to Java
+    var savedLangId = localStorage.getItem("judge0.languageId");
+    var savedLangFlavor = localStorage.getItem("judge0.languageFlavor");
+    if (savedLangId && savedLangFlavor) {
+        selectLanguageByFlavorAndId(parseInt(savedLangId), savedLangFlavor);
+    } else {
+        const JAVA_ID = "91";
+        $selectLanguage.parent(".ui.dropdown").dropdown("set selected", JAVA_ID);
+    }
+    loadSelectedLanguage(true);
 
     $compilerOptions = $("#compiler-options");
     $commandLineArguments = $("#command-line-arguments");
@@ -743,6 +879,26 @@ document.addEventListener("DOMContentLoaded", async function () {
     $statusLine = $("#judge0-status-line");
 
     $(document).on("keydown", "body", function (e) {
+        // Shift+Alt shortcuts (avoid browser conflicts)
+        if (e.shiftKey && e.altKey) {
+            switch (e.key.toLowerCase()) {
+                case "n":
+                    e.preventDefault();
+                    document.getElementById("sidebar-new-file")?.click();
+                    return;
+                case "o":
+                    e.preventDefault();
+                    openAction();
+                    return;
+                case "d":
+                    e.preventDefault();
+                    if (sourceEditor) {
+                        saveFile(sourceEditor.getValue(), currentFileName);
+                    }
+                    return;
+            }
+        }
+
         if (e.metaKey || e.ctrlKey) {
             switch (e.key) {
                 case "Enter":
@@ -753,29 +909,32 @@ document.addEventListener("DOMContentLoaded", async function () {
                     e.preventDefault();
                     saveAction();
                     break;
-                case "o":
-                    e.preventDefault();
-                    openAction();
-                    break;
                 case "+":
                 case "=":
                     e.preventDefault();
-                    fontSize += 1;
-                    setFontSizeForAllEditors(fontSize);
+                    if (fontSize < 32) {
+                        fontSize += 1;
+                        setFontSizeForAllEditors(fontSize);
+                        updateFontDisplay();
+                    }
                     break;
                 case "-":
                     e.preventDefault();
-                    fontSize -= 1;
-                    setFontSizeForAllEditors(fontSize);
+                    if (fontSize > 8) {
+                        fontSize -= 1;
+                        setFontSizeForAllEditors(fontSize);
+                        updateFontDisplay();
+                    }
                     break;
                 case "0":
                     e.preventDefault();
                     fontSize = 13;
                     setFontSizeForAllEditors(fontSize);
+                    updateFontDisplay();
                     break;
                 case "`":
                     e.preventDefault();
-                    sourceEditor.focus();
+                    if (sourceEditor) sourceEditor.focus();
                     break;
             }
         }
@@ -783,10 +942,46 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     require(["vs/editor/editor.main"], function (ignorable) {
         layout = new GoldenLayout(layoutConfig, $("#judge0-site-content"));
+        window.__ideModules = { layout: layout };
+
+        layout.registerComponent("welcome", function (container) {
+            var isMac = /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform);
+            var modKey = isMac ? "⌘" : "Ctrl";
+            var el = container.getElement()[0];
+            el.innerHTML = `
+                <div class="welcome-screen">
+                    <h1 class="welcome-title">Welcome</h1>
+                    <p class="welcome-subtitle">Get started by creating a file or opening an existing one.</p>
+                    <div class="welcome-actions">
+                        <div class="welcome-section">
+                            <h3>Start</h3>
+                            <button class="welcome-link" data-action="new-file">New File</button>
+                            <button class="welcome-link" data-action="new-folder">New Folder</button>
+                            <button class="welcome-link" data-action="open-file">Open File from Disk</button>
+                        </div>
+                        <div class="welcome-section">
+                            <h3>Help</h3>
+                            <div class="welcome-shortcut"><span class="welcome-key">${modKey}+Enter</span> Run Code</div>
+                            <div class="welcome-shortcut"><span class="welcome-key">${modKey}+S</span> Save File</div>
+                            <div class="welcome-shortcut"><span class="welcome-key">${modKey}+O</span> Open File</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            el.querySelector('[data-action="new-file"]').addEventListener("click", function () {
+                FileManager.createAndRenameFile();
+            });
+            el.querySelector('[data-action="new-folder"]').addEventListener("click", function () {
+                FileManager.createAndRenameFolder();
+            });
+            el.querySelector('[data-action="open-file"]').addEventListener("click", function () {
+                document.getElementById("judge0-open-file-btn")?.click();
+            });
+        });
 
         layout.registerComponent("source", function (container, state) {
-            sourceContainer = container;
-            sourceEditor = monaco.editor.create(container.getElement()[0], {
+            
+            const editor = monaco.editor.create(container.getElement()[0], {
                 automaticLayout: true,
                 scrollBeyondLastLine: true,
                 readOnly: state.readOnly,
@@ -795,17 +990,16 @@ document.addEventListener("DOMContentLoaded", async function () {
                     enabled: true
                 },
 
-                // Disable auto-indent
-                autoIndent: "none",
-                formatOnType: false,
-                formatOnPaste: false,
+                autoIndent: "full",
+                formatOnType: true,
+                formatOnPaste: true,
 
-                 //Disable automatic bracket/quote closing
-                autoClosingBrackets: "never",
-                autoClosingQuotes: "never",
-                autoSurround: "never",
+                autoClosingBrackets: "always",
+                autoClosingQuotes: "always",
+                autoSurround: "languageDefined",
 
-                // Disable autocomplete
+                glyphMargin: true,
+
                 quickSuggestions: false,
                 suggestOnTriggerCharacters: false,
                 parameterHints: { enabled: false },
@@ -815,12 +1009,96 @@ document.addEventListener("DOMContentLoaded", async function () {
                 snippetSuggestions: "none"
             });
 
+            // Set initial content if parsed dynamically via file_explorer open callbacks
+            if (state.initialContent !== undefined) {
+                editor.setValue(state.initialContent);
+            }
+
+            let fileId = state.fileId;
+            if (!fileId) {
+                // If it is the default first tab generated implicitly by Golden Layout's config tree
+                let initialFile = FileManager.getInitialFileContent();
+                if (initialFile) {
+                    fileId = initialFile.id;
+                    container.setTitle(initialFile.name);
+                    editor.setValue(initialFile.content);
+                    currentFileName = initialFile.name;
+                    selectLanguageForExtension(initialFile.name.split(".").pop());
+                } else {
+                    fileId = "default";
+                }
+                container._config.componentState = { fileId: fileId };
+                sourceEditor = editor;
+                sourceContainer = container;
+            }
+
+            window.sourceEditors[fileId] = editor;
+
+            container.on("show", () => {
+                sourceEditor = editor;
+                sourceContainer = container;
+
+                // Get the canonical file name from the VFS
+                let vfsFile = FileManager.findFile(fileId, FileManager.tree);
+                if (vfsFile) {
+                    currentFileName = vfsFile.name;
+                } else {
+                    currentFileName = container._config.title;
+                }
+                selectLanguageForExtension(currentFileName.split(".").pop());
+
+                // Sync sidebar selection
+                FileManager.activeFileId = fileId;
+                let parentId = FileManager.findParentFolderId(fileId, FileManager.tree);
+                if (parentId) {
+                    FileManager.activeFolderId = parentId;
+                }
+                FileManager.render();
+
+                // Reattach vim to the newly active editor
+                try {
+                    if (window.__vimHelpers) window.__vimHelpers.reattach();
+                } catch(e) {}
+            });
+
+            container.on("destroy", () => {
+                // Save content before disposing
+                try {
+                    let file = FileManager.findFile(fileId, FileManager.tree);
+                    if (file) {
+                        file.content = editor.getValue();
+                        FileManager.saveWorkspace();
+                    }
+                } catch (e) {}
+                try {
+                    if (window.__vimHelpers) window.__vimHelpers.detach();
+                } catch(e) {}
+                delete window.sourceEditors[fileId];
+                editor.dispose();
+
+                // If this was the active editor, clear the reference
+                if (sourceEditor === editor) {
+                    sourceEditor = null;
+                    sourceContainer = null;
+                }
+            });
+
+            // Disable F1 command palette and right-click context menu
+            editor.addCommand(monaco.KeyCode.F1, function () {});
+            editor.updateOptions({ contextmenu: false });
+
             // When the user types in the source editor, mark file as modified
-           sourceEditor.onDidChangeModelContent(function () {
+            editor.onDidChangeModelContent(function () {
                 if (suppressDirty) return;   // ignore changes caused by setValue/openFile/init
                 hasUnsavedChanges = true;
                 updateSourceTabTitle();
                 scheduleAutosave();         // schedule an autosave after user stops typing for a bit
+
+                // Persist source code to localStorage
+                try { localStorage.setItem("judge0.sourceCode", editor.getValue()); } catch (e) {}
+                if (fileId !== "default") {
+                    try { FileManager.saveActiveFile(editor.getValue()); } catch (e) {}
+                }
             });
 
              // After initial editor setup/content load finishes, mark file as clean and enable dirty tracking
@@ -830,13 +1108,13 @@ document.addEventListener("DOMContentLoaded", async function () {
                 updateSourceTabTitle();
             }, 0);
 
-            sourceEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
                 saveNow("manual");
             });
 
-            sourceEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
 
-            sourceEditor.onDidChangeModelContent(() => {
+            editor.onDidChangeModelContent(() => {
                 lastCompiledCode = null;
                 updateRunButtonState();
             });
@@ -912,7 +1190,17 @@ document.addEventListener("DOMContentLoaded", async function () {
         });
 
         layout.registerComponent("stdin", function (container, state) {
-            stdinEditor = monaco.editor.create(container.getElement()[0], {
+            var el = container.getElement()[0];
+
+            // Add placeholder overlay for stdin
+            var placeholder = document.createElement("div");
+            placeholder.className = "stdin-placeholder";
+            placeholder.textContent = "Enter input for your program here (e.g. values read by stdin)";
+            placeholder.style.cssText = "position:absolute;top:0;color:#888;pointer-events:none;z-index:1;padding:2px 0;font-family:'JetBrains Mono',monospace;";
+            el.style.position = "relative";
+            el.appendChild(placeholder);
+
+            stdinEditor = monaco.editor.create(el, {
                 automaticLayout: true,
                 scrollBeyondLastLine: false,
                 readOnly: state.readOnly,
@@ -921,6 +1209,25 @@ document.addEventListener("DOMContentLoaded", async function () {
                     enabled: false
                 }
             });
+
+            // Sync placeholder position and size with editor gutter/font
+            function updatePlaceholderPosition() {
+                var layoutInfo = stdinEditor.getLayoutInfo();
+                var opts = stdinEditor.getOptions();
+                var currentFontSize = opts.get(monaco.editor.EditorOption.fontSize);
+                placeholder.style.left = layoutInfo.contentLeft + "px";
+                placeholder.style.fontSize = currentFontSize + "px";
+                placeholder.style.lineHeight = stdinEditor.getOption(monaco.editor.EditorOption.lineHeight) + "px";
+            }
+            stdinEditor.onDidLayoutChange(updatePlaceholderPosition);
+            updatePlaceholderPosition();
+
+            // Show/hide placeholder based on content
+            function togglePlaceholder() {
+                placeholder.style.display = stdinEditor.getValue() ? "none" : "block";
+            }
+            stdinEditor.onDidChangeModelContent(togglePlaceholder);
+            togglePlaceholder();
         });
 
         layout.registerComponent("stdout", function (container, state) {
@@ -957,18 +1264,200 @@ document.addEventListener("DOMContentLoaded", async function () {
             });
         });
 
-        layout.registerComponent("ai", function (container, state) {
-            container.getElement()[0].appendChild(document.getElementById("judge0-chat-container"));
-        });
+
 
         layout.on("initialised", function () {
+            FileManager.init({
+                onOpenFile: (content, name) => {
+                    openFile(content, name);
+                },
+                onRenameFile: (name) => {
+                    setSourceCodeName(name);
+                }
+            });
+
+            // Handle new file from sidebar
+            var sidebarNewFileBtn = document.getElementById("sidebar-new-file");
+            if (sidebarNewFileBtn) {
+                sidebarNewFileBtn.addEventListener("click", function () {
+                    FileManager.createAndRenameFile();
+                });
+            }
+
+            // Handle new folder from sidebar
+            var sidebarNewFolderBtn = document.getElementById("sidebar-new-folder");
+            if (sidebarNewFolderBtn) {
+                sidebarNewFolderBtn.addEventListener("click", function () {
+                    FileManager.createAndRenameFolder();
+                });
+            }
+
+            // Resizer handle logic
+            var resizer = document.getElementById("sidebar-resizer");
+            var sidebar = document.getElementById("judge0-sidebar");
+            var isResizing = false;
+
+            if (resizer && sidebar) {
+                resizer.addEventListener("mousedown", function(e) {
+                    isResizing = true;
+                    document.body.style.cursor = 'col-resize';
+                    resizer.classList.add("dragging");
+                });
+
+                document.addEventListener("mousemove", function(e) {
+                    if (!isResizing) return;
+                    var newWidth = e.clientX - sidebar.getBoundingClientRect().left;
+                    if (newWidth > 150 && newWidth < 800) {
+                        sidebar.style.width = newWidth + "px";
+                        refreshLayoutSize();
+                    }
+                });
+
+                document.addEventListener("mouseup", function(e) {
+                    if (isResizing) {
+                        isResizing = false;
+                        document.body.style.cursor = '';
+                        resizer.classList.remove("dragging");
+                    }
+                });
+            }
+
+            // Handle explicit close button from sidebar
+            var sidebarCloseBtn = document.getElementById("sidebar-close");
+            if (sidebarCloseBtn) {
+                sidebarCloseBtn.addEventListener("click", function() {
+                    var explorerIcon = document.querySelector('.activity-icon[data-panel="explorer"]');
+                    var sidebar = document.getElementById("judge0-sidebar");
+                    
+                    if (explorerIcon) explorerIcon.classList.remove("active");
+                    if (sidebar) sidebar.classList.add("collapsed");
+                    
+                    refreshLayoutSize();
+                });
+            }
+
+            // Initialize settings panel
+            Settings.init({ onRefreshLayout: refreshLayoutSize });
+
+            // Activity bar: toggle sidebar / settings
+            document.querySelectorAll(".activity-icon").forEach(function (icon) {
+                icon.addEventListener("click", function () {
+                    var panel = this.getAttribute("data-panel");
+                    var sidebar = document.getElementById("judge0-sidebar");
+
+                    if (this.classList.contains("active")) {
+                        // Collapse current panel
+                        this.classList.remove("active");
+                        if (panel === "settings") {
+                            Settings.hide();
+                        } else {
+                            sidebar.classList.add("collapsed");
+                        }
+                    } else {
+                        // Deactivate all icons
+                        document.querySelectorAll(".activity-icon").forEach(function (i) { i.classList.remove("active"); });
+                        this.classList.add("active");
+
+                        if (panel === "settings") {
+                            Settings.show();
+                        } else {
+                            Settings.hide();
+                            sidebar.classList.remove("collapsed");
+                        }
+                    }
+
+                    // Refresh immediately for a snappy UX
+                    refreshLayoutSize();
+                });
+            });
+
             setDefaults();
             refreshLayoutSize();
+            // Apply saved font size and word wrap after editors exist
+            setFontSizeForAllEditors(fontSize);
+            var wrapSetting = localStorage.getItem("judge0.wordWrap") !== "off" ? "on" : "off";
+            Object.values(window.sourceEditors).forEach(ed => { if (ed) ed.updateOptions({ wordWrap: wrapSetting }); });
+            if (stdinEditor) stdinEditor.updateOptions({ wordWrap: wrapSetting });
+            if (compileOutEditor) compileOutEditor.updateOptions({ wordWrap: wrapSetting });
+            if (runOutEditor) runOutEditor.updateOptions({ wordWrap: wrapSetting });
             window.top.postMessage({ event: "initialised" }, "*");
         });
 
         layout.init();
     });
+
+    // Vim mode support — only one instance at a time (the active tab)
+    var vimEnabled = localStorage.getItem("judge0.vimMode") === "on";
+    var activeVimInstance = null;
+    var MonacoVim = null;
+
+    // Load monaco-vim module
+    require(["monaco-vim"], function (mod) {
+        MonacoVim = mod;
+        if (vimEnabled) {
+            applyVimMode();
+        }
+    });
+
+    function applyVimMode() {
+        var statusBar = document.getElementById("vim-status-bar");
+        var vimBtn = document.getElementById("vim-toggle-btn");
+
+        // Always dispose the current instance first
+        if (activeVimInstance) {
+            activeVimInstance.dispose();
+            activeVimInstance = null;
+        }
+        statusBar.innerHTML = "";
+
+        if (vimEnabled && MonacoVim && sourceEditor) {
+            statusBar.style.display = "block";
+            if (vimBtn) { vimBtn.style.opacity = "1"; vimBtn.style.color = "#4ec9b0"; }
+            activeVimInstance = MonacoVim.initVimMode(sourceEditor, statusBar);
+        } else {
+            statusBar.style.display = "none";
+            if (vimBtn) { vimBtn.style.opacity = "0.6"; vimBtn.style.color = ""; }
+        }
+    }
+
+    // Called when tabs switch — reattach vim to the newly active editor
+    window.__vimHelpers = {
+        reattach: function() {
+            if (vimEnabled && MonacoVim) {
+                applyVimMode();
+                if (window.__vimSettingsApply) window.__vimSettingsApply();
+            }
+        },
+        detach: function() {
+            if (activeVimInstance) {
+                activeVimInstance.dispose();
+                activeVimInstance = null;
+            }
+            var statusBar = document.getElementById("vim-status-bar");
+            if (statusBar) statusBar.innerHTML = "";
+        },
+        getVimAPI: function() {
+            if (MonacoVim && MonacoVim.VimMode) return MonacoVim.VimMode.Vim;
+            return null;
+        },
+        toggle: function(enabled) {
+            vimEnabled = enabled;
+            applyVimMode();
+            if (enabled && window.__vimSettingsApply) window.__vimSettingsApply();
+        }
+    };
+
+    var vimToggleBtn = document.getElementById("vim-toggle-btn");
+    if (vimToggleBtn) {
+        vimToggleBtn.addEventListener("click", function () {
+            vimEnabled = !vimEnabled;
+            try { localStorage.setItem("judge0.vimMode", vimEnabled ? "on" : "off"); } catch (e) {}
+            applyVimMode();
+            if (vimEnabled && window.__vimSettingsApply) window.__vimSettingsApply();
+            // Sync the settings panel toggle
+            Settings.syncToggle();
+        });
+    }
 
     let superKey = "⌘";
     if (!/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
@@ -979,19 +1468,65 @@ document.addEventListener("DOMContentLoaded", async function () {
         btn.attr("data-content", `${superKey}${btn.attr("data-content")}`);
     });
 
-    document.querySelectorAll(".description").forEach(e => {
-        e.innerText = `${superKey}${e.innerText}`;
+    document.getElementById("judge0-open-file-btn")?.addEventListener("click", openAction);
+    document.getElementById("judge0-save-btn")?.addEventListener("click", saveAction);
+    document.getElementById("judge0-download-btn")?.addEventListener("click", function () {
+        if (sourceEditor) {
+            saveFile(sourceEditor.getValue(), currentFileName);
+        }
     });
 
-    if (usePuter()) {
-        puter.ui.onLaunchedWithItems(async function (items) {
-            gPuterFile = items[0];
-            openFile(await (await gPuterFile.read()).text(), gPuterFile.name);
-        });
+    // Font size toolbar controls
+    var $fontDisplay = document.getElementById("font-size-display");
+    function updateFontDisplay() {
+        $fontDisplay.textContent = fontSize + "px";
+        try { localStorage.setItem("judge0.fontSize", fontSize); } catch (e) {}
     }
+    // Restore saved font size
+    var savedFontSize = localStorage.getItem("judge0.fontSize");
+    if (savedFontSize) {
+        fontSize = parseInt(savedFontSize);
+    }
+    updateFontDisplay();
 
-    document.getElementById("judge0-open-file-btn").addEventListener("click", openAction);
-    document.getElementById("judge0-save-btn").addEventListener("click", saveAction);
+    document.getElementById("font-decrease-btn").addEventListener("click", function () {
+        if (fontSize > 8) {
+            fontSize -= 1;
+            setFontSizeForAllEditors(fontSize);
+            updateFontDisplay();
+        }
+    });
+    document.getElementById("font-increase-btn").addEventListener("click", function () {
+        if (fontSize < 32) {
+            fontSize += 1;
+            setFontSizeForAllEditors(fontSize);
+            updateFontDisplay();
+        }
+    });
+
+    // Word wrap toggle
+    var wordWrapEnabled = localStorage.getItem("judge0.wordWrap") !== "off";
+    var $wordWrapBtn = document.getElementById("word-wrap-btn");
+    function applyWordWrap() {
+        var setting = wordWrapEnabled ? "on" : "off";
+        Object.values(window.sourceEditors).forEach(ed => { if (ed) ed.updateOptions({ wordWrap: setting }); });
+        if (stdinEditor) stdinEditor.updateOptions({ wordWrap: setting });
+        if (compileOutEditor) compileOutEditor.updateOptions({ wordWrap: setting });
+        if (runOutEditor) runOutEditor.updateOptions({ wordWrap: setting });
+        if (wordWrapEnabled) {
+            $wordWrapBtn.classList.add("active");
+        } else {
+            $wordWrapBtn.classList.remove("active");
+        }
+        try { localStorage.setItem("judge0.wordWrap", setting); } catch (e) {}
+    }
+    $wordWrapBtn.addEventListener("click", function () {
+        wordWrapEnabled = !wordWrapEnabled;
+        applyWordWrap();
+    });
+
+
+
 
     window.onmessage = function (e) {
         if (!e.data) {
@@ -1001,7 +1536,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         if (e.data.action === "get") {
             window.top.postMessage(JSON.parse(JSON.stringify({
                 event: "getResponse",
-                source_code: sourceEditor.getValue(),
+                source_code: sourceEditor ? sourceEditor.getValue() : "",
                 language_id: getSelectedLanguageId(),
                 flavor: getSelectedLanguageFlavor(),
                 stdin: stdinEditor.getValue(),
@@ -1010,7 +1545,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 command_line_arguments: $commandLineArguments.val()
             })), "*");
         } else if (e.data.action === "set") {
-            if (e.data.source_code) {
+            if (e.data.source_code && sourceEditor) {
                 sourceEditor.setValue(e.data.source_code);
             }
             if (e.data.language_id && e.data.flavor) {
@@ -1038,131 +1573,18 @@ document.addEventListener("DOMContentLoaded", async function () {
 });
 
 const DEFAULT_SOURCE = "\
-#include <algorithm>\n\
-#include <cstdint>\n\
-#include <iostream>\n\
-#include <limits>\n\
-#include <set>\n\
-#include <utility>\n\
-#include <vector>\n\
-\n\
-using Vertex    = std::uint16_t;\n\
-using Cost      = std::uint16_t;\n\
-using Edge      = std::pair< Vertex, Cost >;\n\
-using Graph     = std::vector< std::vector< Edge > >;\n\
-using CostTable = std::vector< std::uint64_t >;\n\
-\n\
-constexpr auto kInfiniteCost{ std::numeric_limits< CostTable::value_type >::max() };\n\
-\n\
-auto dijkstra( Vertex const start, Vertex const end, Graph const & graph, CostTable & costTable )\n\
-{\n\
-    std::fill( costTable.begin(), costTable.end(), kInfiniteCost );\n\
-    costTable[ start ] = 0;\n\
-\n\
-    std::set< std::pair< CostTable::value_type, Vertex > > minHeap;\n\
-    minHeap.emplace( 0, start );\n\
-\n\
-    while ( !minHeap.empty() )\n\
-    {\n\
-        auto const vertexCost{ minHeap.begin()->first  };\n\
-        auto const vertex    { minHeap.begin()->second };\n\
-\n\
-        minHeap.erase( minHeap.begin() );\n\
-\n\
-        if ( vertex == end )\n\
-        {\n\
-            break;\n\
-        }\n\
-\n\
-        for ( auto const & neighbourEdge : graph[ vertex ] )\n\
-        {\n\
-            auto const & neighbour{ neighbourEdge.first };\n\
-            auto const & cost{ neighbourEdge.second };\n\
-\n\
-            if ( costTable[ neighbour ] > vertexCost + cost )\n\
-            {\n\
-                minHeap.erase( { costTable[ neighbour ], neighbour } );\n\
-                costTable[ neighbour ] = vertexCost + cost;\n\
-                minHeap.emplace( costTable[ neighbour ], neighbour );\n\
-            }\n\
-        }\n\
+public class Main {\n\
+    public static void main(String[] args) {\n\
+        System.out.println(\"Hello, World!\");\n\
     }\n\
-\n\
-    return costTable[ end ];\n\
-}\n\
-\n\
-int main()\n\
-{\n\
-    constexpr std::uint16_t maxVertices{ 10000 };\n\
-\n\
-    Graph     graph    ( maxVertices );\n\
-    CostTable costTable( maxVertices );\n\
-\n\
-    std::uint16_t testCases;\n\
-    std::cin >> testCases;\n\
-\n\
-    while ( testCases-- > 0 )\n\
-    {\n\
-        for ( auto i{ 0 }; i < maxVertices; ++i )\n\
-        {\n\
-            graph[ i ].clear();\n\
-        }\n\
-\n\
-        std::uint16_t numberOfVertices;\n\
-        std::uint16_t numberOfEdges;\n\
-\n\
-        std::cin >> numberOfVertices >> numberOfEdges;\n\
-\n\
-        for ( auto i{ 0 }; i < numberOfEdges; ++i )\n\
-        {\n\
-            Vertex from;\n\
-            Vertex to;\n\
-            Cost   cost;\n\
-\n\
-            std::cin >> from >> to >> cost;\n\
-            graph[ from ].emplace_back( to, cost );\n\
-        }\n\
-\n\
-        Vertex start;\n\
-        Vertex end;\n\
-\n\
-        std::cin >> start >> end;\n\
-\n\
-        auto const result{ dijkstra( start, end, graph, costTable ) };\n\
-\n\
-        if ( result == kInfiniteCost )\n\
-        {\n\
-            std::cout << \"NO\\n\";\n\
-        }\n\
-        else\n\
-        {\n\
-            std::cout << result << '\\n';\n\
-        }\n\
-    }\n\
-\n\
-    return 0;\n\
 }\n\
 ";
 
-const DEFAULT_STDIN = "\
-3\n\
-3 2\n\
-1 2 5\n\
-2 3 7\n\
-1 3\n\
-3 3\n\
-1 2 4\n\
-1 3 7\n\
-2 3 1\n\
-1 3\n\
-3 1\n\
-1 2 4\n\
-1 3\n\
-";
+const DEFAULT_STDIN = "";
 
 const DEFAULT_COMPILER_OPTIONS = "";
 const DEFAULT_CMD_ARGUMENTS = "";
-const DEFAULT_LANGUAGE_ID = 105; // C++ (GCC 14.1.0) (https://ce.judge0.com/languages/105)
+const DEFAULT_LANGUAGE_ID = 62; // Java (OpenJDK 13.0.1)
 
 function getEditorLanguageMode(languageName) {
     const DEFAULT_EDITOR_LANGUAGE_MODE = "plaintext";
@@ -1200,24 +1622,9 @@ function getEditorLanguageMode(languageName) {
 }
 
 const EXTENSIONS_TABLE = {
-    "asm": { "flavor": CE, "language_id": 45 }, // Assembly (NASM 2.14.02)
-    "c": { "flavor": CE, "language_id": 103 }, // C (GCC 14.1.0)
-    "cpp": { "flavor": CE, "language_id": 105 }, // C++ (GCC 14.1.0)
-    "cs": { "flavor": EXTRA_CE, "language_id": 29 }, // C# (.NET Core SDK 7.0.400)
-    "go": { "flavor": CE, "language_id": 95 }, // Go (1.18.5)
-    "java": { "flavor": CE, "language_id": 91 }, // Java (JDK 17.0.6)
-    "js": { "flavor": CE, "language_id": 102 }, // JavaScript (Node.js 22.08.0)
-    "lua": { "flavor": CE, "language_id": 64 }, // Lua (5.3.5)
-    "pas": { "flavor": CE, "language_id": 67 }, // Pascal (FPC 3.0.4)
-    "php": { "flavor": CE, "language_id": 98 }, // PHP (8.3.11)
-    "py": { "flavor": EXTRA_CE, "language_id": 25 }, // Python for ML (3.11.2)
-    "r": { "flavor": CE, "language_id": 99 }, // R (4.4.1)
-    "rb": { "flavor": CE, "language_id": 72 }, // Ruby (2.7.0)
-    "rs": { "flavor": CE, "language_id": 73 }, // Rust (1.40.0)
-    "scala": { "flavor": CE, "language_id": 81 }, // Scala (2.13.2)
-    "sh": { "flavor": CE, "language_id": 46 }, // Bash (5.0.0)
-    "swift": { "flavor": CE, "language_id": 83 }, // Swift (5.2.3)
-    "ts": { "flavor": CE, "language_id": 101 }, // TypeScript (5.6.2)
+    "java": { "flavor": CE, "language_id": 62 }, // Java (OpenJDK 13.0.1)
+    "c": { "flavor": CE, "language_id": 50 }, // C (GCC 9.2.0)
+    "py": { "flavor": CE, "language_id": 71 }, // Python (3.8.1)
     "txt": { "flavor": CE, "language_id": 43 }, // Plain Text
 };
 
