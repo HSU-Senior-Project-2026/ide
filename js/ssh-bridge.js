@@ -44,6 +44,8 @@ app.get("/", (req, res) => {
 
 // Variable to hold active SSH session
 let sshSession = null;
+// Cached home directory for the signed-in user
+let sshHomeDir = null;
 
 // SSH endpoint for sign-in
 app.post("/ssh-sign-in", (req, res) => {
@@ -58,9 +60,20 @@ app.post("/ssh-sign-in", (req, res) => {
   const conn = new Client();
   let responded = false;
 
-  conn.on("ready", () => {
+  conn.on("ready", async () => {
     console.log(`[SSH LOGIN SUCCESS]`);
     sshSession = conn; // keep the session active for sign-out
+
+    // Cache the user's home directory
+    try {
+      const home = await sshExec("echo $HOME");
+      sshHomeDir = home.trim();
+      console.log(`[SSH HOME] ${sshHomeDir}`);
+    } catch (err) {
+      console.error("[SSH HOME ERROR]", err.message);
+      sshHomeDir = null;
+    }
+
     if (!responded) {
       responded = true;
       res.json({ success: true, message: "SSH connection established" });
@@ -92,6 +105,7 @@ app.post("/ssh-sign-out", (req, res) => {
     try {
       sshSession.end(); // safely close SSH session
       sshSession = null;
+      sshHomeDir = null;
       return res.json({ success: true, message: "SSH session closed" });
     } catch (err) {
       console.error("Error closing SSH session:", err);
@@ -123,26 +137,89 @@ function sshExec(command) {
   });
 }
 
+// Resolve a path (expanding ~ to home dir) and ensure it stays within the home directory.
+// Returns the resolved absolute path, or throws if the path is outside the home dir.
+async function validatePath(inputPath) {
+  if (!sshHomeDir) throw new Error("Home directory not resolved");
+
+  // Replace leading ~ with the home directory
+  let resolved = inputPath.replace(/^~/, sshHomeDir);
+
+  // Use the server-side realpath to resolve symlinks and .. segments
+  // Fall back to manual normalization if realpath fails (e.g. path doesn't exist yet)
+  try {
+    resolved = (await sshExec(`realpath -m ${JSON.stringify(resolved)}`)).trim();
+  } catch {
+    resolved = path.posix.normalize(resolved);
+  }
+
+  // Ensure the resolved path is within (or equal to) the home directory
+  if (resolved !== sshHomeDir && !resolved.startsWith(sshHomeDir + "/")) {
+    throw new Error("Access denied: path is outside your home directory");
+  }
+
+  return resolved;
+}
+
+// Parse a `ls -laF` permission string and return { readable, writable } for the owner
+function parsePermissions(permStr) {
+  // permStr looks like "drwxr-xr-x" (10 chars)
+  // Owner permissions are chars 1-3
+  return {
+    readable: permStr.charAt(1) === "r",
+    writable: permStr.charAt(2) === "w",
+  };
+}
+
 // List files and folders at a given path
-// Returns array of { name, type: "file"|"directory" }
+// Returns array of { name, type, readable, writable }
 app.post("/ssh-ls", async (req, res) => {
   const dir = req.body.path || "~";
 
   try {
-    // ls -1F appends / to dirs, @ to symlinks, * to executables
-    const output = await sshExec(`ls -1aF ${JSON.stringify(dir)}`);
-    const entries = output.split("\n").filter(Boolean).map((entry) => {
-      if (entry === "./" || entry === "../") return null;
+    const resolvedDir = await validatePath(dir);
+    const isHome = resolvedDir === sshHomeDir;
 
-      const isDir = entry.endsWith("/");
-      const name = entry.replace(/[/*@=|]$/, ""); // strip type indicators
-      return { name, type: isDir ? "directory" : "file" };
-    }).filter(Boolean);
+    // ls -laF gives us permissions + type indicators
+    const output = await sshExec(`ls -laF ${JSON.stringify(resolvedDir)}`);
+    const lines = output.split("\n").filter(Boolean);
 
-    res.json({ success: true, path: dir, entries });
+    const entries = [];
+    for (const line of lines) {
+      // Skip the "total N" line
+      if (line.startsWith("total ")) continue;
+
+      // Parse ls -la output: perms links owner group size date name
+      const parts = line.split(/\s+/);
+      if (parts.length < 9) continue;
+
+      const permStr = parts[0];
+      // Name is everything from column 9 onward (handles spaces in names)
+      const rawName = parts.slice(8).join(" ");
+
+      // Skip current directory entry
+      if (rawName === "./" || rawName === ".") continue;
+
+      // Handle ".." — include it so the frontend can navigate up
+      if (rawName === "../" || rawName === "..") {
+        if (!isHome) {
+          entries.unshift({ name: "..", type: "directory", readable: true, writable: false });
+        }
+        continue;
+      }
+
+      const isDir = rawName.endsWith("/");
+      const name = rawName.replace(/[/*@=|]$/, "");
+      const { readable, writable } = parsePermissions(permStr);
+
+      entries.push({ name, type: isDir ? "directory" : "file", readable, writable });
+    }
+
+    res.json({ success: true, path: resolvedDir, isHome, entries });
   } catch (err) {
     console.error("[SSH-LS ERROR]", err.message);
-    res.json({ success: false, error: err.message });
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    res.status(status).json({ success: false, error: err.message });
   }
 });
 
@@ -155,11 +232,13 @@ app.post("/ssh-read", async (req, res) => {
   }
 
   try {
-    const content = await sshExec(`cat ${JSON.stringify(filePath)}`);
-    res.json({ success: true, path: filePath, content });
+    const resolvedPath = await validatePath(filePath);
+    const content = await sshExec(`cat ${JSON.stringify(resolvedPath)}`);
+    res.json({ success: true, path: resolvedPath, content });
   } catch (err) {
     console.error("[SSH-READ ERROR]", err.message);
-    res.json({ success: false, error: err.message });
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    res.status(status).json({ success: false, error: err.message });
   }
 });
 
@@ -172,12 +251,109 @@ app.post("/ssh-write", async (req, res) => {
   }
 
   try {
+    const resolvedPath = await validatePath(filePath);
     // Base64 encode to safely handle special characters and newlines
     const encoded = Buffer.from(content || "").toString("base64");
-    await sshExec(`echo ${JSON.stringify(encoded)} | base64 -d > ${JSON.stringify(filePath)}`);
-    res.json({ success: true, path: filePath });
+    await sshExec(`echo ${JSON.stringify(encoded)} | base64 -d > ${JSON.stringify(resolvedPath)}`);
+    res.json({ success: true, path: resolvedPath });
   } catch (err) {
     console.error("[SSH-WRITE ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    res.status(status).json({ success: false, error: err.message });
+  }
+});
+
+// Create a directory
+app.post("/ssh-mkdir", async (req, res) => {
+  const dirPath = req.body.path;
+  if (!dirPath) {
+    return res.json({ success: false, error: "Path is required" });
+  }
+
+  try {
+    const resolvedPath = await validatePath(dirPath);
+    await sshExec(`mkdir ${JSON.stringify(resolvedPath)}`);
+    res.json({ success: true, path: resolvedPath });
+  } catch (err) {
+    console.error("[SSH-MKDIR ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    res.status(status).json({ success: false, error: err.message });
+  }
+});
+
+// Rename / move a file or folder
+app.post("/ssh-mv", async (req, res) => {
+  const { from, to } = req.body;
+  if (!from || !to) {
+    return res.json({ success: false, error: "Both 'from' and 'to' paths are required" });
+  }
+
+  try {
+    const resolvedFrom = await validatePath(from);
+    const resolvedTo = await validatePath(to);
+    await sshExec(`mv ${JSON.stringify(resolvedFrom)} ${JSON.stringify(resolvedTo)}`);
+    res.json({ success: true, from: resolvedFrom, to: resolvedTo });
+  } catch (err) {
+    console.error("[SSH-MV ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    res.status(status).json({ success: false, error: err.message });
+  }
+});
+
+// Delete a single file or empty folder
+app.post("/ssh-rm", async (req, res) => {
+  const filePath = req.body.path;
+  if (!filePath) {
+    return res.json({ success: false, error: "Path is required" });
+  }
+
+  try {
+    const resolvedPath = await validatePath(filePath);
+
+    // Determine if it's a directory — if so, use rmdir (only removes empty dirs)
+    const fileType = (await sshExec(`stat -c %F ${JSON.stringify(resolvedPath)}`)).trim();
+    if (fileType === "directory") {
+      await sshExec(`rmdir ${JSON.stringify(resolvedPath)}`);
+    } else {
+      await sshExec(`rm ${JSON.stringify(resolvedPath)}`);
+    }
+
+    res.json({ success: true, path: resolvedPath });
+  } catch (err) {
+    console.error("[SSH-RM ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    res.status(status).json({ success: false, error: err.message });
+  }
+});
+
+// Per-user settings — stored as ~/.judge0-settings.json on the SSH server
+const SETTINGS_FILE = "~/.judge0-settings.json";
+
+app.post("/user-settings", async (req, res) => {
+  const { action, settings } = req.body;
+
+  if (!sshSession) {
+    return res.json({ success: false, error: "Not signed in" });
+  }
+
+  try {
+    if (action === "load") {
+      // Read the settings file; return empty object if it doesn't exist
+      const output = await sshExec(`cat ${SETTINGS_FILE} 2>/dev/null || echo "{}"`);
+      const parsed = JSON.parse(output.trim());
+      res.json({ success: true, settings: parsed });
+    } else if (action === "save") {
+      if (!settings || typeof settings !== "object") {
+        return res.json({ success: false, error: "Invalid settings payload" });
+      }
+      const encoded = Buffer.from(JSON.stringify(settings, null, 2)).toString("base64");
+      await sshExec(`echo ${JSON.stringify(encoded)} | base64 -d > ${SETTINGS_FILE}`);
+      res.json({ success: true });
+    } else {
+      res.json({ success: false, error: "Unknown action. Use 'load' or 'save'." });
+    }
+  } catch (err) {
+    console.error("[USER-SETTINGS ERROR]", err.message);
     res.json({ success: false, error: err.message });
   }
 });

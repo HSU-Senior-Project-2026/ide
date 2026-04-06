@@ -1,7 +1,7 @@
 # SSH File Explorer — Roadmap
 
 ## Goal
-Replace the local-only (localStorage) file tree with a **live SSH file explorer** that browses the student's home directory on `csci.hsutx.edu`. Files and folders render in the sidebar just like VS Code, with `..` navigation, lazy loading, and permission guards.
+Replace the local-only (localStorage) file tree with a **live SSH file explorer** that browses the student's home directory on `csci.hsutx.edu` once they are logged in. No files should be displayed if the student is not logged in. Files and folders render in the sidebar just like VS Code, with `..` navigation, lazy loading, and permission guards.
 
 ---
 

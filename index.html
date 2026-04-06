@@ -186,11 +186,21 @@
     <div id="judge0-site-wrapper">
         <!--Activity Bar (icon strip)-->
         <div id="judge0-activity-bar">
-            <div class="activity-icon active" data-panel="explorer" title="Explorer">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                    <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2" />
-                    <rect x="3" y="7" width="18" height="14" rx="2" />
-                </svg>
+            <div class="activity-bar-top">
+                <div class="activity-icon active" data-panel="explorer" title="Explorer">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2" />
+                        <rect x="3" y="7" width="18" height="14" rx="2" />
+                    </svg>
+                </div>
+            </div>
+            <div class="activity-bar-bottom">
+                <div class="activity-icon" data-panel="settings" title="Settings">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                    </svg>
+                </div>
             </div>
         </div>
 
@@ -246,6 +256,92 @@
                 <div class="sidebar-placeholder">Sign in to browse files</div>
             </div>
             <div id="sidebar-resizer"></div>
+        </div>
+
+        <!--Settings Panel-->
+        <div id="judge0-settings-panel" class="judge0-hidden">
+            <div id="settings-header">
+                <span class="sidebar-title">SETTINGS</span>
+                <div class="sidebar-actions">
+                    <button id="settings-close" class="sidebar-action-btn" title="Close Settings">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div id="settings-body">
+                <div id="settings-categories">
+                    <div class="settings-category active" data-category="general">General</div>
+                    <div class="settings-category" data-category="accessibility">Accessibility</div>
+                </div>
+                <div id="settings-content">
+                    <!--General Settings-->
+                    <div class="settings-section" data-section="general">
+                        <div class="settings-group">
+                            <label class="settings-label">Theme</label>
+                            <select id="settings-theme" class="settings-select" disabled>
+                                <option value="">Default</option>
+                            </select>
+                        </div>
+                        <div class="settings-group">
+                            <label class="settings-label">VIM Mode</label>
+                            <div class="settings-toggle-row">
+                                <label class="settings-toggle">
+                                    <input type="checkbox" id="settings-vim-toggle">
+                                    <span class="settings-toggle-slider"></span>
+                                </label>
+                                <span class="settings-toggle-label" id="vim-toggle-status">Off</span>
+                            </div>
+                        </div>
+
+                        <div id="vim-config-section" class="judge0-hidden">
+                            <!--Escape Key Timeout-->
+                            <div class="settings-group">
+                                <label class="settings-label">Escape Key Timeout</label>
+                                <p class="settings-hint">Delay (ms) to wait for multi-key escape combos (e.g. jk). Higher values give more time to press the second key.</p>
+                                <input type="number" id="vim-esc-timeout" class="settings-input" min="50" max="2000" step="50" value="200">
+                            </div>
+
+                            <!--Key Mappings-->
+                            <div class="settings-group">
+                                <label class="settings-label">Key Mappings</label>
+                                <p class="settings-hint">Map key sequences to other keys or commands. Non-recursive maps prevent chain reactions.</p>
+                                <table id="vim-keymaps-table" class="settings-table">
+                                    <thead>
+                                        <tr>
+                                            <th>From</th>
+                                            <th>To</th>
+                                            <th>Mode</th>
+                                            <th>Type</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="vim-keymaps-body">
+                                    </tbody>
+                                </table>
+                                <button id="vim-add-mapping" class="settings-btn">+ Add Mapping</button>
+                            </div>
+
+                            <!--Browser Reserved Keys Warning-->
+                            <div class="settings-group">
+                                <div class="settings-warning">
+                                    <span class="settings-warning-icon">&#9888;</span>
+                                    <div>
+                                        <strong>Browser-reserved shortcuts</strong>
+                                        <p class="settings-hint" id="vim-reserved-keys"></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!--Accessibility Settings-->
+                    <div class="settings-section judge0-hidden" data-section="accessibility">
+                        <div class="settings-placeholder">No accessibility options available yet.</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!--Editor / Golden Layout area-->

@@ -1,5 +1,6 @@
 import configuration from "./configuration.js";
 import { FileManager } from "./file_explorer.js";
+import * as Settings from "./settings.js";
 
 // API key and auth are handled server-side by the ssh-bridge proxy — not needed here
 const AUTH_HEADERS = {};
@@ -578,7 +579,17 @@ function saveNow(reason) {
 
   var content = sourceEditor.getValue();
 
-  // MVP: save to localStorage (silent autosave)
+  if (FileManager.mode === "ssh") {
+    // SSH mode: save to remote server (async)
+    FileManager.saveActiveFile(content).then(() => {
+      isSaving = false;
+      hasUnsavedChanges = false;
+      updateSourceTabTitle();
+    });
+    return;
+  }
+
+  // Local mode: save to localStorage
   localStorage.setItem("autosave:" + currentFileName, content);
   FileManager.saveActiveFile(content);
 
@@ -920,7 +931,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     require(["vs/editor/editor.main"], function (ignorable) {
         layout = new GoldenLayout(layoutConfig, $("#judge0-site-content"));
-        window.__ideModules = { layout: layout };
+        window.__ideModules = { layout: layout, FileManager: FileManager };
 
         layout.registerComponent("source", function (container, state) {
             
@@ -1005,14 +1016,16 @@ document.addEventListener("DOMContentLoaded", async function () {
             });
 
             container.on("destroy", () => {
-                // Save content before disposing
-                try {
-                    let file = FileManager.findFile(fileId, FileManager.tree);
-                    if (file) {
-                        file.content = editor.getValue();
-                        FileManager.saveWorkspace();
-                    }
-                } catch (e) {}
+                // Save content before disposing (local mode only — SSH saves on Ctrl+S / autosave)
+                if (FileManager.mode !== "ssh") {
+                    try {
+                        let file = FileManager.findFile(fileId, FileManager.tree);
+                        if (file) {
+                            file.content = editor.getValue();
+                            FileManager.saveWorkspace();
+                        }
+                    } catch (e) {}
+                }
                 try {
                     if (window.__vimHelpers) window.__vimHelpers.detach();
                 } catch(e) {}
@@ -1031,10 +1044,12 @@ document.addEventListener("DOMContentLoaded", async function () {
                 updateSourceTabTitle();
                 scheduleAutosave();         // schedule an autosave after user stops typing for a bit
 
-                // Persist source code to localStorage
-                try { localStorage.setItem("judge0.sourceCode", editor.getValue()); } catch (e) {}
-                if (fileId !== "default") {
-                    try { FileManager.saveActiveFile(editor.getValue()); } catch (e) {}
+                // Persist source code (localStorage in local mode, debounced via autosave in SSH mode)
+                if (FileManager.mode !== "ssh") {
+                    try { localStorage.setItem("judge0.sourceCode", editor.getValue()); } catch (e) {}
+                    if (fileId !== "default") {
+                        try { FileManager.saveActiveFile(editor.getValue()); } catch (e) {}
+                    }
                 }
             });
 
@@ -1273,21 +1288,34 @@ document.addEventListener("DOMContentLoaded", async function () {
                 });
             }
 
-            // Activity bar: toggle sidebar
+            // Initialize settings panel
+            Settings.init({ onRefreshLayout: refreshLayoutSize });
+
+            // Activity bar: toggle sidebar / settings
             document.querySelectorAll(".activity-icon").forEach(function (icon) {
                 icon.addEventListener("click", function () {
                     var panel = this.getAttribute("data-panel");
                     var sidebar = document.getElementById("judge0-sidebar");
 
                     if (this.classList.contains("active")) {
-                        // Collapse sidebar
+                        // Collapse current panel
                         this.classList.remove("active");
-                        sidebar.classList.add("collapsed");
+                        if (panel === "settings") {
+                            Settings.hide();
+                        } else {
+                            sidebar.classList.add("collapsed");
+                        }
                     } else {
-                        // Expand sidebar
+                        // Deactivate all icons
                         document.querySelectorAll(".activity-icon").forEach(function (i) { i.classList.remove("active"); });
                         this.classList.add("active");
-                        sidebar.classList.remove("collapsed");
+
+                        if (panel === "settings") {
+                            Settings.show();
+                        } else {
+                            Settings.hide();
+                            sidebar.classList.remove("collapsed");
+                        }
                     }
 
                     // Refresh immediately for a snappy UX
@@ -1349,6 +1377,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         reattach: function() {
             if (vimEnabled && MonacoVim) {
                 applyVimMode();
+                if (window.__vimSettingsApply) window.__vimSettingsApply();
             }
         },
         detach: function() {
@@ -1358,6 +1387,15 @@ document.addEventListener("DOMContentLoaded", async function () {
             }
             var statusBar = document.getElementById("vim-status-bar");
             if (statusBar) statusBar.innerHTML = "";
+        },
+        getVimAPI: function() {
+            if (MonacoVim && MonacoVim.VimMode) return MonacoVim.VimMode.Vim;
+            return null;
+        },
+        toggle: function(enabled) {
+            vimEnabled = enabled;
+            applyVimMode();
+            if (enabled && window.__vimSettingsApply) window.__vimSettingsApply();
         }
     };
 
@@ -1367,6 +1405,9 @@ document.addEventListener("DOMContentLoaded", async function () {
             vimEnabled = !vimEnabled;
             try { localStorage.setItem("judge0.vimMode", vimEnabled ? "on" : "off"); } catch (e) {}
             applyVimMode();
+            if (vimEnabled && window.__vimSettingsApply) window.__vimSettingsApply();
+            // Sync the settings panel toggle
+            Settings.syncToggle();
         });
     }
 
