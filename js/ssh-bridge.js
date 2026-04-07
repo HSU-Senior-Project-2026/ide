@@ -183,6 +183,6 @@ app.post("/ssh-write", async (req, res) => {
 });
 
 // Start HTTP server on port 80
-http.createServer(app).listen(3000, "127.0.0.1", () => {
+http.createServer(app).listen(3000, "0.0.0.0", () => {
   console.log("Server running on http://localhost:3000");
 });

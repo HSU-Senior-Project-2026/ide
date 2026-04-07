@@ -1542,3 +1542,19 @@ const EXTENSIONS_TABLE = {
 function getLanguageForExtension(extension) {
     return EXTENSIONS_TABLE[extension] || { "flavor": CE, "language_id": 43 }; // Plain Text (https://ce.judge0.com/languages/43)
 }
+
+window.increaseFont = function () {
+    if (fontSize < 32) {
+        fontSize += 2;
+        setFontSizeForAllEditors(fontSize);
+        updateFontDisplay();
+    }
+};
+
+window.decreaseFont = function () {
+    if (fontSize > 8) {
+        fontSize -= 2;
+        setFontSizeForAllEditors(fontSize);
+        updateFontDisplay();
+    }
+};

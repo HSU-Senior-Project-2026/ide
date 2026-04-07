@@ -118,6 +118,7 @@
 
     <meta name="msapplication-TileColor" content="#ffffff">
     <meta name="theme-color" content="#ffffff">
+
 </head>
 
 <body>
@@ -146,7 +147,10 @@
                 <span class="terminal-label">&gt;_</span>
             </button>
         </div>
-        <div class="right menu">
+            <button onclick="increaseFont()">A+</button>
+	    <button onclick="decreaseFont()">A-</button>	    
+       
+	<div class="right menu">
             <div id="vim-toggle-btn" class="icon link item" title="Toggle Vim Mode" style="font-weight: bold; font-size: 12px; opacity: 0.6;">
                 VIM
             </div>
@@ -299,13 +303,11 @@
 
     <div id="vim-status-bar" style="display:none; position:fixed; bottom:0; left:0; right:0; height:22px; background:#1e1e1e; color:#d4d4d4; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:22px; padding:0 12px; z-index:200; border-top:1px solid #333;"></div>
     <div id="judge0-status-line" class="ui bottom right attached mini label judge0-showStatusLine"></div>
-
-    <script>
+   
+     <script>
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("sw.js").then(() => console.log("Service Worker Registered"));
         }
-
-
     </script>
 </body>
 
