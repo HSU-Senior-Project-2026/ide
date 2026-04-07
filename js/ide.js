@@ -29,9 +29,7 @@ var AUTOSAVE_MS = 5000; // 2–5 seconds (pick what you want)
 
 export var sourceEditor;
 var stdinEditor;
-var stdoutEditor;
 var compileOutEditor;
-var runOutEditor;
 
 var $selectLanguage;
 var $compilerOptions;
@@ -137,7 +135,6 @@ function clearIO() {
     // Clear the I/O editors
     if (stdinEditor) stdinEditor.setValue("");
     if (compileOutEditor) compileOutEditor.setValue("");
-    if (runOutEditor) runOutEditor.setValue("");
 
     // Optional: clear old status line
     if ($statusLine) $statusLine.html("");
@@ -177,7 +174,6 @@ function compileOnly() {
     updateRunButtonState();
 
     if (compileOutEditor) compileOutEditor.setValue("");
-    if (runOutEditor) runOutEditor.setValue("");
 
     $statusLine.html("Compiling...");
 
@@ -497,9 +493,7 @@ async function saveAction() {
 function setFontSizeForAllEditors(fontSize) {
     if (sourceEditor) sourceEditor.updateOptions({ fontSize });
     if (stdinEditor) stdinEditor.updateOptions({ fontSize });
-    if (stdoutEditor) stdoutEditor.updateOptions({ fontSize });
     if (compileOutEditor) compileOutEditor.updateOptions({ fontSize });
-    if (runOutEditor) runOutEditor.updateOptions({ fontSize });
 }
 
 function loadLanguages() {
@@ -595,7 +589,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     loadLanguages();
     // Default editor language for MVP
-    const JAVA_ID = "91"; // replace after you confirm
+    const JAVA_ID = "62";
     $selectLanguage.parent(".ui.dropdown").dropdown("set selected", JAVA_ID);
     loadSelectedLanguage(true); // ensure Monaco updates; true avoids filename reset
 
@@ -811,18 +805,6 @@ document.addEventListener("DOMContentLoaded", async function () {
             });
         });
 
-        layout.registerComponent("stdout", function (container, state) {
-            stdoutEditor = monaco.editor.create(container.getElement()[0], {
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-                readOnly: state.readOnly,
-                language: "plaintext",
-                minimap: {
-                    enabled: false
-                }
-            });
-        });
-
         layout.registerComponent("compileOut", function (container, state) {
             compileOutEditor = monaco.editor.create(container.getElement()[0], {
                 automaticLayout: true,
@@ -830,17 +812,6 @@ document.addEventListener("DOMContentLoaded", async function () {
                 readOnly: true,
                 language: "plaintext",
                 minimap: { enabled: false 
-                }
-            });
-        });
-
-        layout.registerComponent("runOut", function (container, state) {
-            runOutEditor = monaco.editor.create(container.getElement()[0], {
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-                readOnly: true,
-                language: "plaintext",
-                minimap: { enabled: false
                 }
             });
         });
@@ -938,9 +909,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 event: "getResponse",
                 source_code: sourceEditor.getValue(),
                 language_id: getSelectedLanguageId(),
-                flavor: getSelectedLanguageFlavor(),
                 stdin: stdinEditor.getValue(),
-                stdout: stdoutEditor.getValue(),
                 compiler_options: $compilerOptions.val(),
                 command_line_arguments: $commandLineArguments.val()
             })), "*");
@@ -953,9 +922,6 @@ document.addEventListener("DOMContentLoaded", async function () {
             }
             if (e.data.stdin) {
                 stdinEditor.setValue(e.data.stdin);
-            }
-            if (e.data.stdout) {
-                stdoutEditor.setValue(e.data.stdout);
             }
             if (e.data.compiler_options) {
                 $compilerOptions.val(e.data.compiler_options);
