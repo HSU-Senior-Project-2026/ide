@@ -136,6 +136,8 @@ app.post("/ssh-sign-out", (req, res) => {
 });
 
 // Start HTTP server on port 80
-http.createServer(app).listen(80, "0.0.0.0", () => {
-  console.log("Server running on http://localhost:80");
+const PORT = 3000;
+
+http.createServer(app).listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
