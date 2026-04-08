@@ -12,6 +12,10 @@ const SUPPORTED_LANGUAGES = [
     { id: 46,  name: "Bash",       source_file: "main.sh",   editor_mode: "shell" },
 ];
 
+// Language IDs that are interpreted (no compile step needed).
+// For these, Run auto-uploads and executes without requiring a separate Compile click.
+const INTERPRETED_LANGUAGE_IDS = [71, 102, 46]; // Python, Node.js, Bash
+
 var fontSize = 13;
 
 export var layout;
@@ -289,6 +293,17 @@ function compileOnly() {
     };
 }
 
+function updateCompileButtonVisibility() {
+    if (!$compileBtn) return;
+    const languageId = getSelectedLanguageId();
+    if (INTERPRETED_LANGUAGE_IDS.includes(languageId)) {
+        $compileBtn.hide();
+    } else {
+        $compileBtn.show();
+    }
+    updateRunButtonState();
+}
+
 function updateRunButtonState() {
     if (!$runBtn) return;
 
@@ -307,28 +322,41 @@ function updateRunButtonState() {
     }
 }
 
-function run() {
-    // Gate 1: student must be signed in to the CSCI server.
-    // window.csciSessionToken is set by csci.js after a successful sign-in.
+// For interpreted languages: upload the code via compile WS, then immediately run.
+function autoCompileThenRun(currentCode, languageId) {
     const token = window.csciSessionToken;
-    if (!token) {
-        if (window.sshTerminal) {
-            window.sshTerminal.write("\r\nERROR: Not signed in. Please sign in to the CSCI server first.\r\n");
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const compileUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${languageId}`;
+
+    const compileWs = new WebSocket(compileUrl);
+
+    compileWs.onopen = () => {
+        compileWs.send(sourceEditor.getValue());
+    };
+
+    compileWs.onclose = (event) => {
+        if (event.code === 4000) {
+            // Upload succeeded — now run
+            lastCompiledCode = currentCode;
+            updateRunButtonState();
+            $statusLine.html("Running...");
+            startRunWebSocket(token, languageId);
+        } else {
+            lastCompiledCode = null;
+            $runBtn.removeClass("loading");
+            $statusLine.html("Upload failed.");
+            updateRunButtonState();
         }
-        return;
-    }
+    };
 
-    // Gate 2: code must have been compiled successfully before running.
-    const currentCode = sourceEditor.getValue().trim();
-    if (!lastCompiledCode || currentCode !== lastCompiledCode) {
-        updateRunButtonState();
-        return;
-    }
+    compileWs.onerror = () => {
+        $runBtn.removeClass("loading");
+        $statusLine.html("Connection error.");
+    };
+}
 
-    $runBtn.addClass("loading");
-    $statusLine.html("Connecting...");
-
-    // Switch the visible panel to the terminal tab so the student sees output.
+// Shared logic for opening the run WebSocket (used by both run() and autoCompileThenRun).
+function startRunWebSocket(token, languageId) {
     const termTab = layout.root.getItemsById("terminal")[0];
     if (termTab && termTab.parent && termTab.parent.header && termTab.parent.header.parent) {
         termTab.parent.header.parent.setActiveContentItem(termTab);
@@ -340,7 +368,6 @@ function run() {
         return;
     }
 
-    // Close any WebSocket still open from a previous run before starting a new one.
     if (activeTerminalWS) {
         activeTerminalWS.close();
         activeTerminalWS = null;
@@ -348,30 +375,16 @@ function run() {
 
     term.clear();
 
-    // Build the WebSocket URL. We use window.location.host so this works regardless
-    // of whether the IDE is on localhost, a LAN IP, or a public domain.
-    // ws:// is plain WebSocket (matching our http:// server). wss:// would be used
-    // if the server were running over https://.
-    const languageId = getSelectedLanguageId();
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=run&lang=${languageId}`;
 
     const ws = new WebSocket(wsUrl);
     activeTerminalWS = ws;
 
-    // Wire 1: server → terminal.
-    // Whenever ssh-bridge sends data (program output, error messages, echo text),
-    // write it directly into the xterm.js terminal for the student to see.
     ws.onmessage = (event) => {
         term.write(event.data);
     };
 
-    // Wire 2: terminal keystrokes → server.
-    // term.onData fires for every character the student types, including special
-    // keys like backspace, arrow keys, and Enter. We forward each character to
-    // ssh-bridge, which passes it to the running program's stdin.
-    // onData returns a disposable — calling dispose() stops listening, which we
-    // do when the connection closes to avoid attaching duplicate listeners.
     const dataDisposable = term.onData((data) => {
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(data);
@@ -394,6 +407,41 @@ function run() {
         $runBtn.removeClass("loading");
         $statusLine.html("Connection error.");
     };
+}
+
+function run() {
+    // Gate 1: student must be signed in to the CSCI server.
+    // window.csciSessionToken is set by csci.js after a successful sign-in.
+    const token = window.csciSessionToken;
+    if (!token) {
+        if (window.sshTerminal) {
+            window.sshTerminal.write("\r\nERROR: Not signed in. Please sign in to the CSCI server first.\r\n");
+        }
+        return;
+    }
+
+    // Gate 2: for compiled languages, code must have been compiled first.
+    // For interpreted languages, auto-upload via the compile WebSocket before running.
+    const currentCode = sourceEditor.getValue().trim();
+    const languageId = getSelectedLanguageId();
+    const isInterpreted = INTERPRETED_LANGUAGE_IDS.includes(languageId);
+
+    if (!isInterpreted && (!lastCompiledCode || currentCode !== lastCompiledCode)) {
+        updateRunButtonState();
+        return;
+    }
+
+    $runBtn.addClass("loading");
+    $statusLine.html(isInterpreted ? "Uploading..." : "Connecting...");
+
+    // For interpreted languages, run the compile (upload) step first, then run.
+    if (isInterpreted) {
+        autoCompileThenRun(currentCode, languageId);
+        return;
+    }
+
+    // Compiled language with successful compile — go straight to run.
+    startRunWebSocket(token, languageId);
 }
 
 function openShell() {
@@ -658,13 +706,12 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     $selectLanguage = $("#select-language");
     $selectLanguage.change(function (event, data) {
-        let skipSetDefaultSourceCodeName = (data && data.skipSetDefaultSourceCodeName) || !!gPuterFile;
+        let skipSetDefaultSourceCodeName = !!(data && data.skipSetDefaultSourceCodeName);
         loadSelectedLanguage(skipSetDefaultSourceCodeName);
 
         // Persist selected language to localStorage
         try {
             localStorage.setItem("judge0.languageId", getSelectedLanguageId());
-            localStorage.setItem("judge0.languageFlavor", getSelectedLanguageFlavor());
         } catch (e) {}
     });
 
@@ -1178,7 +1225,6 @@ document.addEventListener("DOMContentLoaded", async function () {
             Object.values(window.sourceEditors).forEach(ed => { if (ed) ed.updateOptions({ wordWrap: wrapSetting }); });
             if (stdinEditor) stdinEditor.updateOptions({ wordWrap: wrapSetting });
             if (compileOutEditor) compileOutEditor.updateOptions({ wordWrap: wrapSetting });
-            if (runOutEditor) runOutEditor.updateOptions({ wordWrap: wrapSetting });
             window.top.postMessage({ event: "initialised" }, "*");
         });
 
@@ -1262,10 +1308,10 @@ document.addEventListener("DOMContentLoaded", async function () {
         }
     });
 
-    // Font size toolbar controls
+    // Font size toolbar controls (elements may not exist in all layouts)
     var $fontDisplay = document.getElementById("font-size-display");
     function updateFontDisplay() {
-        $fontDisplay.textContent = fontSize + "px";
+        if ($fontDisplay) $fontDisplay.textContent = fontSize + "px";
         try { localStorage.setItem("judge0.fontSize", fontSize); } catch (e) {}
     }
     // Restore saved font size
@@ -1275,14 +1321,16 @@ document.addEventListener("DOMContentLoaded", async function () {
     }
     updateFontDisplay();
 
-    document.getElementById("font-decrease-btn").addEventListener("click", function () {
+    var fontDecBtn = document.getElementById("font-decrease-btn");
+    if (fontDecBtn) fontDecBtn.addEventListener("click", function () {
         if (fontSize > 8) {
             fontSize -= 1;
             setFontSizeForAllEditors(fontSize);
             updateFontDisplay();
         }
     });
-    document.getElementById("font-increase-btn").addEventListener("click", function () {
+    var fontIncBtn = document.getElementById("font-increase-btn");
+    if (fontIncBtn) fontIncBtn.addEventListener("click", function () {
         if (fontSize < 32) {
             fontSize += 1;
             setFontSizeForAllEditors(fontSize);
@@ -1298,15 +1346,16 @@ document.addEventListener("DOMContentLoaded", async function () {
         Object.values(window.sourceEditors).forEach(ed => { if (ed) ed.updateOptions({ wordWrap: setting }); });
         if (stdinEditor) stdinEditor.updateOptions({ wordWrap: setting });
         if (compileOutEditor) compileOutEditor.updateOptions({ wordWrap: setting });
-        if (runOutEditor) runOutEditor.updateOptions({ wordWrap: setting });
-        if (wordWrapEnabled) {
-            $wordWrapBtn.classList.add("active");
-        } else {
-            $wordWrapBtn.classList.remove("active");
+        if ($wordWrapBtn) {
+            if (wordWrapEnabled) {
+                $wordWrapBtn.classList.add("active");
+            } else {
+                $wordWrapBtn.classList.remove("active");
+            }
         }
         try { localStorage.setItem("judge0.wordWrap", setting); } catch (e) {}
     }
-    $wordWrapBtn.addEventListener("click", function () {
+    if ($wordWrapBtn) $wordWrapBtn.addEventListener("click", function () {
         wordWrapEnabled = !wordWrapEnabled;
         applyWordWrap();
     });
