@@ -1,23 +1,36 @@
 <!DOCTYPE html>
 <html lang="en-US">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <script src="https://js.puter.com/v2/"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"
+        integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/marked.min.js" integrity="sha512-rvRITpPeEKe4hV9M8XntuXX6nuohzqdR5O3W6nhjTLwkrx0ZgBQuaK4fv5DdOWzs2IaXsGt5h0+nyp9pEuoTXg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js" integrity="sha512-LQNxIMR5rXv7o+b1l8+N1EZMfhG7iFZ9HhnbJkTp4zjNr5Wvst75AqUeFDxeRUa7l5vEDyUiAip//r+EFLLCyA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js" integrity="sha512-iWiuBS5nt6r60fCz26Nd0Zqe0nbk1ZTIQbl3Kv7kYsX+yKMUFHzjaH2+AnM6vp2Xs+gNmaBAVWJjSmuPw76Efg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha512-fHwaWebuwA7NSF5Qg/af4UeDx9XqUpYpOGgubo3yWu+b2IQR4UeQwbb42Ti7gVAjNtVoI/I9TEoYeu9omwcC6g==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.3/purify.min.js" integrity="sha512-Ll+TuDvrWDNNRnFFIM8dOiw7Go7dsHyxRp4RutiIFW/wm3DgDmCnRZow6AqbXnCbpWu93yM1O34q+4ggzGeXVA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/marked.min.js"
+        integrity="sha512-rvRITpPeEKe4hV9M8XntuXX6nuohzqdR5O3W6nhjTLwkrx0ZgBQuaK4fv5DdOWzs2IaXsGt5h0+nyp9pEuoTXg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"
+        integrity="sha512-LQNxIMR5rXv7o+b1l8+N1EZMfhG7iFZ9HhnbJkTp4zjNr5Wvst75AqUeFDxeRUa7l5vEDyUiAip//r+EFLLCyA=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+        integrity="sha512-iWiuBS5nt6r60fCz26Nd0Zqe0nbk1ZTIQbl3Kv7kYsX+yKMUFHzjaH2+AnM6vp2Xs+gNmaBAVWJjSmuPw76Efg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css"
+        integrity="sha512-fHwaWebuwA7NSF5Qg/af4UeDx9XqUpYpOGgubo3yWu+b2IQR4UeQwbb42Ti7gVAjNtVoI/I9TEoYeu9omwcC6g=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.3/purify.min.js"
+        integrity="sha512-Ll+TuDvrWDNNRnFFIM8dOiw7Go7dsHyxRp4RutiIFW/wm3DgDmCnRZow6AqbXnCbpWu93yM1O34q+4ggzGeXVA=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
     <script>
         var require = {
             paths: {
-                "vs": "./vendor/monaco-editor-0.44.0/min/vs"
+                "vs": "./vendor/monaco-editor-0.44.0/min/vs",
+                "monaco-vim": "https://unpkg.com/monaco-vim@0.4.2/dist/monaco-vim"
             }
         };
     </script>
@@ -40,17 +53,20 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap"
+        rel="stylesheet">
 
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.5.0/semantic.min.css" integrity="sha512-KXol4x3sVoO+8ZsWPFI/r5KBVB/ssCGB5tsv2nVOKwLg33wTFP3fmnXa47FdSVIshVTgsYk/1734xSk9aFIa4A==" crossorigin="anonymous" referrerpolicy="no-referrer">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.5.0/semantic.min.js" integrity="sha512-Xo0Jh8MsOn72LGV8kU5LsclG7SUzJsWGhXbWcYs2MAmChkQzwiW/yTQwdJ8w6UA9C6EVG18GHb/TrYpYCjyAQw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.5.0/semantic.min.css"
+        integrity="sha512-KXol4x3sVoO+8ZsWPFI/r5KBVB/ssCGB5tsv2nVOKwLg33wTFP3fmnXa47FdSVIshVTgsYk/1734xSk9aFIa4A=="
+        crossorigin="anonymous" referrerpolicy="no-referrer">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.5.0/semantic.min.js"
+        integrity="sha512-Xo0Jh8MsOn72LGV8kU5LsclG7SUzJsWGhXbWcYs2MAmChkQzwiW/yTQwdJ8w6UA9C6EVG18GHb/TrYpYCjyAQw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-    <script type="module" src="js/ai.js"></script>
     <script type="module" src="js/configuration.js"></script>
     <script type="module" src="js/electron.js"></script>
     <script type="module" src="js/ide.js"></script>
     <script type="module" src="js/local_storage.js"></script>
-    <script type="module" src="js/puter.js"></script>
     <script type="module" src="js/query.js"></script>
     <script type="module" src="js/style.js"></script>
     <script type="module" src="js/theme.js"></script>
@@ -65,7 +81,8 @@
     <meta name="title" content="Judge0 IDE">
     <meta name="description" content="Free and open-source online code editor and compiler">
     <meta name="author" content="Judge0 d.o.o.">
-    <meta name="keywords" content="online editor, online code editor, online ide, online compiler, online interpreter, run code online, learn programming online,
+    <meta name="keywords"
+        content="online editor, online code editor, online ide, online compiler, online interpreter, run code online, learn programming online,
     online debugger, programming in browser, online code runner, online code execution, debug online, debug C code online, debug C++ code online,
     programming online, snippet, snippets, code snippet, code snippets, pastebin, execute code, programming in browser, run c online, run C++ online,
     run java online, run python online, run ruby online, run c# online, run rust online, run pascal online, run basic online">
@@ -73,7 +90,8 @@
     <meta property="og:url" content="https://ide.judge0.com">
     <meta property="og:type" content="website">
     <meta property="og:title" content="Judge0 IDE">
-    <meta property="og:image" content="https://raw.githubusercontent.com/judge0/ide/refs/heads/master/.github/wallpaper.png">
+    <meta property="og:image"
+        content="https://raw.githubusercontent.com/judge0/ide/refs/heads/master/.github/wallpaper.png">
     <meta property="og:image:alt" content="Judge0 IDE">
     <meta property="og:description" content="Free and open-source online code editor and compiler">
     <meta property="og:site_name" content="Judge0 IDE">
@@ -82,7 +100,8 @@
     <meta property="twitter:url" content="https://ide.judge0.com">
     <meta property="twitter:card" content="summary_large_image">
     <meta property="twitter:title" content="Judge0 IDE">
-    <meta property="twitter:image" content="https://raw.githubusercontent.com/judge0/ide/refs/heads/master/.github/wallpaper.png">
+    <meta property="twitter:image"
+        content="https://raw.githubusercontent.com/judge0/ide/refs/heads/master/.github/wallpaper.png">
     <meta property="twitter:description" content="Free and open-source online code editor and compiler">
 
     <link rel="shortcut icon" href="/favicons/favicon.ico">
@@ -101,36 +120,11 @@
 
 <body>
     <div id="judge0-site-navigation" class="ui top fixed borderless menu judge0-showNavigation">
-        <a id="judge0-header" href="https://judge0.com" target="_blank" class="header item judge0-showLogo">
+        <a id="judge0-header" href="/" class="header item judge0-showLogo">
             <img id="judge0-logo" src="./images/icon_var2_rounded_512.png">
         </a>
-        <div class="ui simple dropdown item judge0-showFileMenu">
-            <span class="text">File</span>
-            <i class="dropdown icon"></i>
-            <div class="menu judge0-file-menu">
-                <div id="judge0-open-file-btn" class="item">
-                    <span class="description">+O</span>
-                    <span class="text"><i class="file icon"></i>Open File...</span>
-                    <input type="file" id="open-file-input" style="display: none;">
-                </div>
-                <div id="judge0-save-btn" class="item">
-                    <span class="description">+S</span>
-                    <span class="text"><i class="save icon"></i>Save</span>
-                </div>
-            </div>
-        </div>
-        <div class="ui simple dropdown item judge0-showHelpMenu">
-            <span class="text">Help</span>
-            <i class="dropdown icon"></i>
-            <div class="menu judge0-file-menu">
-                <!-- <a href="https://github.com/judge0/ide" class="link text item" target="_blank"><i class="external square alternate icon"></i>GitHub Repository</a>
-                <a href="/embed" class="link text item" target="_blank"><i class="external square alternate icon"></i>Embed Guide</a>
-                <a href="https://platform.sulu.sh/apis/judge0" class="link text item" target="_blank"><i class="external square alternate icon"></i>HTTP API Documentation</a> -->
-                <a href="PRIVACY.md" class="link text item" target="_blank"><i class="external square alternate icon"></i>Privacy Policy</a>
-                <a href="TERMS.md" class="link text item" target="_blank"><i class="external square alternate icon"></i>Terms of Service</a>
-            </div>
-        </div>
-        <div class="item judge0-showSelectLanguage">
+
+        <div class="item judge0-showSelectLanguage" style="display: none !important;">
             <select id="select-language" class="ui search selection dropdown"></select>
         </div>
         <!--<div class="item judge0-showCompilerOptions">
@@ -139,23 +133,15 @@
                 <input id="compiler-options" type="text" placeholder="Compiler options"></input>
             </div>
         </div> -->
-        <div class="item judge0-showCommandLineArguments">
-            <div class="ui left icon transparent input">
-                <i class="terminal icon"></i>
-                <input id="command-line-arguments" type="text" placeholder="Command line arguments"></input>
-            </div>
-        </div>
         <div class="item judge0-showRunButton">
             <button id="compile-btn" class="ui button">
-                 Compile Code
+                Compile Code
             </button>
-            <button id="run-btn" class="ui primary labeled icon button" data-content="+↵">
-                <i class="play icon"></i>
-                Run Code
+            <button id="run-btn" class="ui primary button" data-content="+↵">
+                <i class="play icon"></i> Run
             </button>
-            <button id="clear-btn" class="ui primary labeled icon button" data-content="+↵" >
-                <i class="trash icon"></i>
-                Clear
+            <button id="terminal-btn" class="ui basic icon button terminal-btn" title="Terminal">
+                <span class="terminal-label">&gt;_</span>
             </button>
             <button id="shell-btn" class="ui labeled icon button">
                 <i class="terminal icon"></i>
@@ -164,24 +150,30 @@
 
         </div>
         <div class="right menu">
+            <div id="vim-toggle-btn" class="icon link item" title="Toggle Vim Mode" style="font-weight: bold; font-size: 12px; opacity: 0.6;">
+                VIM
+            </div>
             <div id="judge0-theme-toggle-btn" class="icon link item judge0-showThemeButton" data-content="">
                 <i id="judge0-theme-toggle-btn-icon" class="sun icon"></i>
             </div>
-            <!--SIGN IN AND OUT BUTTONS FOR CSCI (csci.js)-->
-            <div class ="item judge0-showCSCISignInOutButton">
-                <button id="judge0-csci-sign-in-btn" class="ui basic button">
-                    <i class="sign-in icon"></i>
-                    Sign in with CSCI
-                </button>
-                <button id="judge0-csci-sign-out-btn" class="ui basic button" data-content="Sign out">
-                    <i class="sign-out icon"></i>
-                    <span id="judge0-csci-username">Sign out</span>
-                </button>
-
-
+            <!--ACCOUNT DROPDOWN FOR CSCI (csci.js)-->
+            <div class="item judge0-showCSCISignInOutButton">
+                <div id="judge0-account-dropdown" class="ui simple dropdown button basic compact">
+                    <i class="user circle icon" style="margin:0 4px 0 0"></i>
+                    <span id="judge0-account-label">Account</span>
+                    <i class="dropdown icon"></i>
+                    <div class="menu" style="right:0;left:auto;">
+                        <div id="judge0-csci-sign-in-btn" class="item">
+                            <i class="sign-in icon"></i> Sign in with CSCI
+                        </div>
+                        <div id="judge0-csci-sign-out-btn" class="item" style="display:none;">
+                            <i class="sign-out icon"></i> Sign out
+                        </div>
+                    </div>
+                </div>
             </div>
             <!--SIGN IN AND OUT BUTTONS FOR PUTER (puter.js)-->
-               <!-- <div class="item judge0-showPuterSignInOutButton">
+            <!-- <div class="item judge0-showPuterSignInOutButton">
             <button id="judge0-sign-in-btn" class="ui basic button">
                     <i class="sign-in icon"></i>
                     Sign in with Puter
@@ -194,7 +186,75 @@
         </div>
     </div>
 
-    <div id="judge0-site-content"></div>
+    <div id="judge0-site-wrapper">
+        <!--Activity Bar (icon strip)-->
+        <div id="judge0-activity-bar">
+            <div class="activity-icon active" data-panel="explorer" title="Explorer">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2" />
+                    <rect x="3" y="7" width="18" height="14" rx="2" />
+                </svg>
+            </div>
+        </div>
+
+        <!--File Explorer Sidebar-->
+        <div id="judge0-sidebar">
+            <div id="sidebar-header">
+                <span class="sidebar-title">EXPLORER</span>
+                <div class="sidebar-actions">
+                    <button id="sidebar-new-file" class="sidebar-action-btn" title="New File">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="12" y1="11" x2="12" y2="17" />
+                            <line x1="9" y1="14" x2="15" y2="14" />
+                        </svg>
+                    </button>
+                    <button id="sidebar-new-folder" class="sidebar-action-btn" title="New Folder">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z">
+                            </path>
+                            <line x1="12" y1="11" x2="12" y2="17"></line>
+                            <line x1="9" y1="14" x2="15" y2="14"></line>
+                        </svg>
+                    </button>
+                    <button id="sidebar-refresh" class="sidebar-action-btn" title="Refresh">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="23 4 23 10 17 10" />
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                        </svg>
+                    </button>
+                    <button id="sidebar-collapse" class="sidebar-action-btn" title="Collapse All">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="4 14 10 14 10 20" />
+                            <polyline points="20 10 14 10 14 4" />
+                            <line x1="14" y1="10" x2="21" y2="3" />
+                            <line x1="3" y1="21" x2="10" y2="14" />
+                        </svg>
+                    </button>
+                    <button id="sidebar-close" class="sidebar-action-btn" title="Close Sidebar">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div id="sidebar-tree">
+                <div class="sidebar-placeholder">Sign in to browse files</div>
+            </div>
+            <div id="sidebar-resizer"></div>
+        </div>
+
+        <!--Editor / Golden Layout area-->
+        <div id="judge0-site-content"></div>
+    </div>
+
 
     <!--Sign in Modal for CSCI-->
     <div id="judge0-csci-sign-in-modal" class="ui modal" autocomplete="off">
@@ -205,14 +265,17 @@
             <form id="judge0-csci-sign-in-form" class="ui form">
                 <div class="field">
                     <label>Username</label>
-                    <input type="text" id="modal_username" name="modal_username" placeholder="Username" required autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+                    <input type="text" id="modal_username" name="modal_username" placeholder="Username" required
+                        autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
                 </div>
                 <div class="field">
                     <label>Password</label>
-                    <input type="password" id="modal_password" name="modal_password" placeholder="Password" required  autocapitalize="off" autocorrect="off" spellcheck="false">
+                    <input type="password" id="modal_password" name="modal_password" placeholder="Password" required
+                        autocapitalize="off" autocorrect="off" spellcheck="false">
                 </div>
                 <button id="judge0-csci-modal-sign-in-btn" type="button" class="ui primary button">Sign In</button>
-                <button id="judge0-csci-modal-sign-in-cancel-btn" type="button" class="ui secondary button">Cancel</button>
+                <button id="judge0-csci-modal-sign-in-cancel-btn" type="button"
+                    class="ui secondary button">Cancel</button>
             </form>
         </div>
     </div>
@@ -224,7 +287,9 @@
         </div>
         <div class="scrolling content"></div>
         <div class="actions">
-            <a id="report-problem-btn" class="ui labeled icon red button" href="https://github.com/judge0/ide/issues/new?title=New+bug+report&body=Describe+the+problem." target="_blank">
+            <a id="report-problem-btn" class="ui labeled icon red button"
+                href="https://github.com/judge0/ide/issues/new?title=New+bug+report&body=Describe+the+problem."
+                target="_blank">
                 <i class="flag icon"></i>
                 Report Problem
             </a>
@@ -235,57 +300,16 @@
         </div>
     </div>
 
-    <div id="judge0-chat-container" class="ui segment">
-        <div class="ui top attached borderless menu">
-            <div class="item">
-                <div class="ui toggle checked checkbox">
-                    <input id="judge0-inline-suggestions" type="checkbox" checked="">
-                    <label>Inline Suggestions</label>
-                </div>
-            </div>
-            <div class="right menu">
-                <div class="fitted item">
-                    <select id="judge0-chat-model-select" class="ui search selection dropdown item">
-                        <option>gpt-4o-mini</option>
-                        <option>gpt-4o</option>
-                        <option>o3-mini</option>
-                        <option>o1-mini</option>
-                        <option>claude-3-5-sonnet</option>
-                        <option>deepseek-chat</option>
-                        <option>deepseek-reasoner</option>
-                        <option>meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo</option>
-                        <option>meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo</option>
-                        <option>meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo</option>
-                        <option>mistral-large-latest</option>
-                        <option>pixtral-large-latest</option>
-                        <option>codestral-latest</option>
-                        <option>google/gemma-2-27b-it</option>
-                        <option>grok-beta</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-        <div id="judge0-chat-messages"></div>
-        <div id="judge0-chat-input-container" class="ui basic segment">
-            <form id="judge0-chat-form" class="ui fluid action input">
-                <input id="judge0-chat-user-input" type="text">
-                <button id="judge0-chat-send-button" class="ui primary icon button" type="submit">
-                    <i class="arrow up icon"></i>
-                </button>
-            </form>
-        </div>
-    </div> 
-
+    <div id="vim-status-bar" style="display:none; position:fixed; bottom:0; left:0; right:0; height:22px; background:#1e1e1e; color:#d4d4d4; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:22px; padding:0 12px; z-index:200; border-top:1px solid #333;"></div>
     <div id="judge0-status-line" class="ui bottom right attached mini label judge0-showStatusLine"></div>
-
-    <a href="https://judge0.com" target="_blank" class="ui bottom center attached mini label judge0-showCopyright">© 2016-2026 Judge0 d.o.o. – All Rights Reserved. • A Croatian 🇭🇷 company</a>
 
     <script>
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("sw.js").then(() => console.log("Service Worker Registered"));
         }
 
-    
+
     </script>
 </body>
+
 </html>

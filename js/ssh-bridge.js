@@ -43,7 +43,7 @@ app.post("/ssh-sign-in", (req, res) => {
     return res.json({ success: false, error: "Username or password missing" });
   }
 
-  console.log(`[SSH LOGIN ATTEMPT] From ${req.ip} → username: ${username}`);
+  console.log(`[SSH LOGIN ATTEMPT] From ${req.ip}`);
 
   const conn = new Client();
   let responded = false;
@@ -70,7 +70,7 @@ app.post("/ssh-sign-in", (req, res) => {
   });
 
   conn.on("error", (err) => {
-    console.log(`[SSH LOGIN FAILED] username: ${username} → ${err.message}`);
+    console.log(`[SSH LOGIN FAILED] ${err.message}`);
     if (!responded) {
       responded = true;
       res.json({ success: false, error: "SSH connection failed: " + err.message });
