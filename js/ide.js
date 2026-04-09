@@ -1,16 +1,30 @@
 import configuration from "./configuration.js";
 import { FileManager } from "./file_explorer.js";
 
-// Supported languages — hardcoded to match LANGUAGE_COMMANDS in ssh-bridge.js.
-// No external Judge0 API needed; all execution happens on the CSCI server via SSH.
-const SUPPORTED_LANGUAGES = [
-    { id: 62,  name: "Java",       source_file: "Main.java", editor_mode: "java" },
-    { id: 103, name: "C (GCC)",    source_file: "main.c",    editor_mode: "c" },
-    { id: 105, name: "C++ (GCC)",  source_file: "main.cpp",  editor_mode: "cpp" },
-    { id: 71,  name: "Python 3",   source_file: "main.py",   editor_mode: "python" },
-    { id: 102, name: "JavaScript (Node.js)", source_file: "main.js", editor_mode: "javascript" },
-    { id: 46,  name: "Bash",       source_file: "main.sh",   editor_mode: "shell" },
-];
+// API key and auth are handled server-side by the ssh-bridge proxy — not needed here
+const AUTH_HEADERS = {};
+
+const CE = "CE";
+const EXTRA_CE = "EXTRA_CE";
+
+// Relative URL: browser calls /judge0/... on port 80, proxy forwards to localhost:2358
+const AUTHENTICATED_CE_BASE_URL = "/judge0";
+const AUTHENTICATED_EXTRA_CE_BASE_URL = "/judge0";
+
+var AUTHENTICATED_BASE_URL = {};
+AUTHENTICATED_BASE_URL[CE] = AUTHENTICATED_CE_BASE_URL;
+AUTHENTICATED_BASE_URL[EXTRA_CE] = AUTHENTICATED_EXTRA_CE_BASE_URL;
+
+const UNAUTHENTICATED_CE_BASE_URL = "/judge0";
+const UNAUTHENTICATED_EXTRA_CE_BASE_URL = "/judge0";
+
+var UNAUTHENTICATED_BASE_URL = {};
+UNAUTHENTICATED_BASE_URL[CE] = UNAUTHENTICATED_CE_BASE_URL;
+UNAUTHENTICATED_BASE_URL[EXTRA_CE] = UNAUTHENTICATED_EXTRA_CE_BASE_URL;
+
+const INITIAL_WAIT_TIME_MS = 0;
+const WAIT_TIME_FUNCTION = i => 100;
+const MAX_PROBE_REQUESTS = 600;
 
 // Language IDs that are interpreted (no compile step needed).
 // For these, Run auto-uploads and executes without requiring a separate Compile click.
@@ -43,13 +57,12 @@ var $runBtn;
 var $clearBtn;
 var $statusLine;
 var $compileBtn;
-var lastCompiledCode=null;
+var lastCompiledCode = null;
 
-// Tracks the currently open WebSocket to the ssh-bridge terminal endpoint.
-// Kept here so we can close it before opening a new one when Run is clicked again.
-var activeTerminalWS = null;
+var timeStart;
 
-
+var sqliteAdditionalFiles;
+var languages = {};
 
 // Error line highlighting decorations
 var errorDecorations = [];
@@ -154,11 +167,13 @@ var layoutConfig = {
                     } : null,
                     configuration.get("appOptions.showOutput") ? {
                         type: "component",
-                        componentName: "terminal",
-                        id: "terminal",
-                        title: "Terminal",
+                        componentName: "runOut",
+                        id: "runOut",
+                        title: "Runtime",
                         isClosable: false,
-                        componentState: {}
+                        componentState: {
+                            readOnly: true
+                        }
                     } : null].filter(Boolean)
             }].filter(Boolean)
         }]
@@ -166,6 +181,19 @@ var layoutConfig = {
 };
 
 
+
+function encode(str) {
+    return btoa(unescape(encodeURIComponent(str || "")));
+}
+
+function decode(bytes) {
+    var escaped = escape(atob(bytes || ""));
+    try {
+        return decodeURIComponent(escaped);
+    } catch {
+        return unescape(escaped);
+    }
+}
 
 function showError(title, content) {
     $("#judge0-site-modal #title").html(title);
@@ -183,6 +211,64 @@ function showError(title, content) {
     $("#judge0-site-modal").modal("show");
 }
 
+function showHttpError(jqXHR) {
+    showError(`${jqXHR.statusText} (${jqXHR.status})`, `<pre>${JSON.stringify(jqXHR, null, 4)}</pre>`);
+}
+
+function handleRunError(jqXHR) {
+    showHttpError(jqXHR);
+    $runBtn.removeClass("loading");
+
+    window.top.postMessage(JSON.parse(JSON.stringify({
+        event: "runError",
+        data: jqXHR
+    })), "*");
+}
+
+function handleResult(data) {
+    const tat = Math.round(performance.now() - timeStart);
+    console.log(`It took ${tat}ms to get submission result.`);
+
+    const status = data.status;
+    const stdout = decode(data.stdout);
+    const stderr = decode(data.stderr);
+    const compileOutput = data.compile_output ? decode(data.compile_output) : null;
+    const time = (data.time === null ? "-" : data.time + "s");
+    const memory = (data.memory === null ? "-" : data.memory + "KB");
+
+    $statusLine.html(`${status.description}, ${time}, ${memory} (TAT: ${tat}ms)`);
+
+    const runtimeOutput = [stdout, stderr].filter(x => x).join("\n").trimEnd();
+    const compileText = (compileOutput || "").trimEnd();
+
+    // Highlight error lines from compiler output or runtime errors
+    highlightErrorLines(compileOutput || stderr);
+
+    // Compile tab: show compiler output or a friendly success message
+    if (compileOutEditor) {
+        compileOutEditor.setValue(compileText || "Compilation successful.");
+        const lastLine = compileOutEditor.getModel()?.getLineCount?.() ?? 1;
+        compileOutEditor.revealLine(lastLine);
+    }
+    // Runtime tab: show stdout + stderr (can be empty if program prints nothing)
+    if (runOutEditor) {
+        runOutEditor.setValue(runtimeOutput);
+        const lastLine = runOutEditor.getModel()?.getLineCount?.() ?? 1;
+        runOutEditor.revealLine(lastLine);
+    }
+    const output = [compileText, runtimeOutput].filter(x => x).join("\n").trimEnd();
+    
+    $runBtn.removeClass("loading");
+
+    window.top.postMessage(JSON.parse(JSON.stringify({
+        event: "postExecution",
+        status: data.status,
+        time: data.time,
+        memory: data.memory,
+        output: output
+    })), "*");
+}
+
 // Clear I/O editors and status line before running new code
 function clearIO() {
     // Clear the I/O editors
@@ -196,18 +282,19 @@ function clearIO() {
     if ($runBtn) $runBtn.removeClass("loading");
 }
 
-function getSelectedLanguage() {
-    const id = getSelectedLanguageId();
-    return SUPPORTED_LANGUAGES.find(l => l.id === id) || SUPPORTED_LANGUAGES[0];
+async function getSelectedLanguage() {
+    return getLanguage(getSelectedLanguageFlavor(), getSelectedLanguageId())
 }
 
 function getSelectedLanguageId() {
     return parseInt($selectLanguage.val());
 }
 
+function getSelectedLanguageFlavor() {
+    return $selectLanguage.find(":selected").attr("flavor");
+}
 
-
-/*function setCompileButtonLoading(loading) {
+function setCompileButtonLoading(loading) {
     if (loading) {
         $compileBtn.addClass("loading disabled");
         $compileBtn.find(".compile-icon").removeClass().addClass("compile-icon spinner loading icon");
@@ -215,7 +302,7 @@ function getSelectedLanguageId() {
         $compileBtn.removeClass("loading disabled");
         $compileBtn.find(".compile-icon").removeClass().addClass("compile-icon");
     }
-}*/
+}
 
 function compileOnly() {
     const currentCode = sourceEditor.getValue().trim();
@@ -227,70 +314,68 @@ function compileOnly() {
         return;
     }
 
-    // Compilation now happens on the CSCI server via SSH, so the student must
-    // be signed in. The token was stored on window by csci.js after sign-in.
-    const token = window.csciSessionToken;
-    if (!token) {
-        showError("Error", "Please sign in to the CSCI server before compiling.");
-        return;
-    }
-
     lastCompiledCode = null;
     updateRunButtonState();
 
     if (compileOutEditor) compileOutEditor.setValue("");
 
     $statusLine.html("Compiling...");
-
-    // Switch to the Compile tab so the student sees compiler output.
+    // Switch to Compile tab when compiling
     const compileTab = layout.root.getItemsById("compileOut")[0];
     if (compileTab) {
         compileTab.parent.header.parent.setActiveContentItem(compileTab);
     }
 
-    const langId   = getSelectedLanguageId();
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl    = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${langId}`;
+    let sourceValue = encode(sourceEditor.getValue());
+    let languageId = getSelectedLanguageId();
+    let flavor = getSelectedLanguageFlavor();
 
-    const ws = new WebSocket(wsUrl);
-    let compileOutput = "";
-
-    ws.onopen = () => {
-        // Send the raw source code as the first (and only) message.
-        // ssh-bridge receives it, base64-encodes it for safe shell handling,
-        // writes it to a temp directory, and runs the compile command.
-        ws.send(sourceEditor.getValue());
+    let data = {
+        source_code: sourceValue,
+        language_id: languageId,
+        stdin: encode(""),
+        redirect_stderr_to_stdout: false
     };
 
-    ws.onmessage = (event) => {
-        // Accumulate compiler output and update the panel live as it arrives.
-        // This gives the student streaming feedback for slow compilers.
-        compileOutput += event.data;
-        if (compileOutEditor) compileOutEditor.setValue(compileOutput);
-    };
+    clearErrorHighlights();
 
-    ws.onclose = (event) => {
-        // ssh-bridge closes with code 4000 on success, 4001 on failure.
-        // This lets us know whether to enable the Run button without needing
-        // to parse the compiler output for error messages.
-        if (event.code === 4000) {
-            lastCompiledCode = currentCode;
+    $.ajax({
+        url: `${AUTHENTICATED_BASE_URL[flavor]}/submissions?base64_encoded=true&wait=true`,
+        type: "POST",
+        contentType: "application/json",
+        data: JSON.stringify(data),
+        headers: AUTH_HEADERS,
+        success: function (data) {
+            const compileOutput = decode(data.compile_output);
+
             if (compileOutEditor) {
-                compileOutEditor.setValue(compileOutput || "Compilation successful.");
+                compileOutEditor.setValue(
+                    compileOutput ? compileOutput : "Compilation successful."
+                );
             }
-            $statusLine.html("Compilation successful.");
-        } else {
-            lastCompiledCode = null;
-            $statusLine.html("Compilation failed.");
-        }
-        updateRunButtonState();
-    };
 
-    ws.onerror = () => {
-        lastCompiledCode = null;
-        $statusLine.html("Connection error during compilation.");
-        updateRunButtonState();
-    };
+            if (runOutEditor) {
+                runOutEditor.setValue("");
+            }
+
+            highlightErrorLines(compileOutput);
+            $statusLine.html(data.status.description);
+
+            // success only when there is no compile output
+            if (!compileOutput) {
+                lastCompiledCode = currentCode;
+            } else {
+                lastCompiledCode = null;
+            }
+
+            updateRunButtonState();
+        },
+        error: function (jqXHR) {
+            lastCompiledCode = null;
+            updateRunButtonState();
+            handleRunError(jqXHR);
+        }
+    });
 }
 
 function updateCompileButtonVisibility() {
@@ -362,18 +447,19 @@ function startRunWebSocket(token, languageId) {
         termTab.parent.header.parent.setActiveContentItem(termTab);
     }
 
-    const term = window.sshTerminal;
-    if (!term) {
-        $runBtn.removeClass("loading");
-        return;
-    }
+    /*let x = layout.root.getItemsById("runOut")[0];
+    x.parent.header.parent.setActiveContentItem(x);*/
 
     if (activeTerminalWS) {
         activeTerminalWS.close();
         activeTerminalWS = null;
     }
 
-    term.clear();
+    let sourceValue = encode(sourceEditor.getValue());
+    let stdinValue = encode(stdinEditor.getValue());
+    let languageId = getSelectedLanguageId();
+    let compilerOptions = $compilerOptions.val();
+    let commandLineArguments = $commandLineArguments.val();
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=run&lang=${languageId}`;
@@ -402,12 +488,14 @@ function startRunWebSocket(token, languageId) {
         $statusLine.html("Program finished.");
     };
 
-    ws.onerror = () => {
-        term.write("\r\nERROR: Lost connection to server.\r\n");
-        $runBtn.removeClass("loading");
-        $statusLine.html("Connection error.");
+    let data = {
+        source_code: sourceValue,
+        language_id: languageId,
+        stdin: stdinValue,
+        compiler_options: compilerOptions,
+        command_line_arguments: commandLineArguments,
+        redirect_stderr_to_stdout: true
     };
-}
 
 function run() {
     // Gate 1: student must be signed in to the CSCI server.
@@ -453,54 +541,52 @@ function openShell() {
         return;
     }
 
-    // Switch to the terminal tab.
-    const termTab = layout.root.getItemsById("terminal")[0];
-    if (termTab && termTab.parent && termTab.parent.header && termTab.parent.header.parent) {
-        termTab.parent.header.parent.setActiveContentItem(termTab);
-    }
-
-    const term = window.sshTerminal;
-    if (!term) return;
-
-    // Close any existing connection (previous run or shell session).
-    if (activeTerminalWS) {
-        activeTerminalWS.close();
-        activeTerminalWS = null;
-    }
-
-    term.clear();
-    $statusLine.html("Opening shell...");
-
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=shell`;
-
-    const ws = new WebSocket(wsUrl);
-    activeTerminalWS = ws;
-
-    ws.onmessage = (event) => {
-        term.write(event.data);
-    };
-
-    const dataDisposable = term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send(data);
+    if (languageId === 82) {
+        if (!sqliteAdditionalFiles) {
+            $.ajax({
+                url: `./data/additional_files_zip_base64.txt`,
+                contentType: "text/plain",
+                success: function (responseData) {
+                    sqliteAdditionalFiles = responseData;
+                    data["additional_files"] = sqliteAdditionalFiles;
+                    sendRequest(data);
+                },
+                error: handleRunError
+            });
         }
+        else {
+            data["additional_files"] = sqliteAdditionalFiles;
+            sendRequest(data);
+        }
+    } else {
+        sendRequest(data);
+    }
+}
+
+function fetchSubmission(flavor, region, submission_token, iteration) {
+    if (iteration >= MAX_PROBE_REQUESTS) {
+        handleRunError({
+            statusText: "Maximum number of probe requests reached.",
+            status: 504
+        }, null, null);
+        return;
+    }
+
+    $.ajax({
+        url: `${UNAUTHENTICATED_BASE_URL[flavor]}/submissions/${submission_token}?base64_encoded=true`,
+        headers: {
+            "X-Judge0-Region": region
+        },
+        success: function (data) {
+            if (data.status.id <= 2) { // In Queue or Processing
+                $statusLine.html(data.status.description);
+                setTimeout(fetchSubmission.bind(null, flavor, region, submission_token, iteration + 1), WAIT_TIME_FUNCTION(iteration));
+            } else {
+                handleResult(data);
+            }
+        },
+        error: handleRunError
     });
-
-    ws.onopen = () => {
-        $statusLine.html("Shell connected.");
-    };
-
-    ws.onclose = () => {
-        dataDisposable.dispose();
-        activeTerminalWS = null;
-        $statusLine.html("Shell disconnected.");
-    };
-
-    ws.onerror = () => {
-        term.write("\r\nERROR: Lost connection to server.\r\n");
-        $statusLine.html("Connection error.");
-    };
 }
 
 // Helper function to update the source tab title with unsaved changes indicator and saving status
@@ -613,34 +699,93 @@ function setFontSizeForAllEditors(fontSize) {
     if (compileOutEditor) compileOutEditor.updateOptions({ fontSize });
 }
 
-function loadLanguages() {
-    let options = SUPPORTED_LANGUAGES.map(lang => {
-        let option = new Option(lang.name, lang.id);
-        option.setAttribute("langauge_mode", lang.editor_mode);
-        if (lang.id === DEFAULT_LANGUAGE_ID) {
-            option.selected = true;
-        }
-        return option;
-    });
+async function loadLangauges() {
+    // Only allow Java, C, and Python from available backend languages
+    var ALLOWED_CE_LANGUAGES = [62, 50, 71];     // Java (OpenJDK 13.0.1), C (GCC 9.2.0), Python (3.8.1)
+    var ALLOWED_EXTRA_CE_LANGUAGES = [];
 
-    $selectLanguage.append(options);
-    $selectLanguage.parent(".ui.dropdown").dropdown("refresh");
+    return new Promise((resolve, reject) => {
+        let options = [];
+
+        $.ajax({
+            url: UNAUTHENTICATED_CE_BASE_URL + "/languages",
+            success: function (data) {
+                for (let i = 0; i < data.length; i++) {
+                    let language = data[i];
+                    // Only add allowed CE languages
+                    if (!ALLOWED_CE_LANGUAGES.includes(language.id)) {
+                        continue;
+                    }
+                    let option = new Option(language.name, language.id);
+                    option.setAttribute("flavor", CE);
+                    option.setAttribute("langauge_mode", getEditorLanguageMode(language.name));
+
+                    //if (language.id !== 89) {
+                        options.push(option);
+                    //}
+
+                    if (language.id === DEFAULT_LANGUAGE_ID) {
+                        option.selected = true;
+                    }
+                }
+            },
+            error: reject
+        }).always(function () {
+            $.ajax({
+                url: UNAUTHENTICATED_EXTRA_CE_BASE_URL + "/languages",
+                success: function (data) {
+                    for (let i = 0; i < data.length; i++) {
+                        let language = data[i];
+                        // Only add allowed Extra CE languages
+                        if (!ALLOWED_EXTRA_CE_LANGUAGES.includes(language.id)) {
+                            continue;
+                        }
+                        let option = new Option(language.name, language.id);
+                        option.setAttribute("flavor", EXTRA_CE);
+                        option.setAttribute("langauge_mode", getEditorLanguageMode(language.name));
+
+                        //if (options.findIndex((t) => (t.text === option.text)) === -1 && language.id !== 89) {
+                            options.push(option);
+                        //}
+                    }
+                },
+                error: reject
+            }).always(function () {
+                options.sort((a, b) => a.text.localeCompare(b.text));
+                $selectLanguage.append(options);
+                $selectLanguage.parent(".ui.dropdown").dropdown("refresh");
+                resolve();
+            });
+        });
+    });
+};
+
+// Languages that are interpreted and do not need a separate compile step
+const INTERPRETED_LANGUAGE_IDS = [71]; // Python (3.8.1)
+
+function updateCompileButtonVisibility() {
+    let languageId = getSelectedLanguageId();
+    if (INTERPRETED_LANGUAGE_IDS.includes(languageId)) {
+        $compileBtn.hide();
+    } else {
+        $compileBtn.show();
+    }
 }
 
-function loadSelectedLanguage(skipSetDefaultSourceCodeName = false) {
+async function loadSelectedLanguage(skipSetDefaultSourceCodeName = false) {
     if (!sourceEditor) {
         console.warn("Editor not initialized yet");
         return;
     }
     monaco.editor.setModelLanguage(sourceEditor.getModel(), $selectLanguage.find(":selected").attr("langauge_mode"));
     if (!skipSetDefaultSourceCodeName) {
-        setSourceCodeName(getSelectedLanguage().source_file);
+        setSourceCodeName((await getSelectedLanguage()).source_file);
     }
     updateCompileButtonVisibility();
 }
 
-function selectLanguageById(languageId) {
-    let option = $selectLanguage.find(`[value=${languageId}]`);
+function selectLanguageByFlavorAndId(languageId, flavor) {
+    let option = $selectLanguage.find(`[value=${languageId}][flavor=${flavor}]`);
     if (option.length) {
         option.prop("selected", true);
         $selectLanguage.trigger("change", { skipSetDefaultSourceCodeName: true });
@@ -649,15 +794,38 @@ function selectLanguageById(languageId) {
 
 function selectLanguageForExtension(extension) {
     let language = getLanguageForExtension(extension);
-    if (language) {
-        selectLanguageById(language.language_id);
-    }
+    selectLanguageByFlavorAndId(language.language_id, language.flavor);
+}
+
+async function getLanguage(flavor, languageId) {
+    return new Promise((resolve, reject) => {
+        if (languages[flavor] && languages[flavor][languageId]) {
+            resolve(languages[flavor][languageId]);
+            return;
+        }
+
+        $.ajax({
+            url: `${UNAUTHENTICATED_BASE_URL[flavor]}/languages/${languageId}`,
+            success: function (data) {
+                if (!languages[flavor]) {
+                    languages[flavor] = {};
+                }
+
+                languages[flavor][languageId] = data;
+                resolve(data);
+            },
+            error: reject
+        });
+    });
 }
 
 function setDefaults() {
     setFontSizeForAllEditors(fontSize);
-    sourceEditor.setValue(DEFAULT_SOURCE);
-    stdinEditor.setValue("");
+
+    // Source editor content is now loaded by the source component itself.
+    // Just initialize the other editors.
+
+    stdinEditor.setValue(DEFAULT_STDIN);
     $compilerOptions.val(DEFAULT_COMPILER_OPTIONS);
     $commandLineArguments.val(DEFAULT_CMD_ARGUMENTS);
 
@@ -732,7 +900,6 @@ document.addEventListener("DOMContentLoaded", async function () {
     $runBtn.click(run);
     $clearBtn.click(clearIO);
     $compileBtn.click(compileOnly);
-    $("#shell-btn").click(openShell);
 
     $("#open-file-input").change(function (e) {
         const selectedFile = e.target.files[0];
@@ -1112,18 +1279,6 @@ document.addEventListener("DOMContentLoaded", async function () {
             // is accessible from any other script on the page.
             window.sshTerminal = term;
 
-            // When the golden-layout panel is resized, resize the terminal to match.
-            // Without this, the terminal stays its original size even if the panel grows.
-            container.on("resize", function () {
-                const cols = Math.max(10, Math.floor(container.width / 8));
-                const rows = Math.max(5, Math.floor(container.height / 17));
-                try { term.resize(cols, rows); } catch (e) { /* ignore during init */ }
-            });
-        });
-
-        layout.registerComponent("ai", function (container, state) {
-            container.getElement()[0].appendChild(document.getElementById("judge0-chat-container"));
-        });
 
         layout.on("initialised", function () {
             FileManager.init({
@@ -1381,8 +1536,8 @@ document.addEventListener("DOMContentLoaded", async function () {
             if (e.data.source_code) {
                 sourceEditor.setValue(e.data.source_code);
             }
-            if (e.data.language_id) {
-                selectLanguageById(e.data.language_id);
+            if (e.data.language_id && e.data.flavor) {
+                selectLanguageByFlavorAndId(e.data.language_id, e.data.flavor);
             }
             if (e.data.stdin) {
                 stdinEditor.setValue(e.data.stdin);
@@ -1392,6 +1547,9 @@ document.addEventListener("DOMContentLoaded", async function () {
             }
             if (e.data.command_line_arguments) {
                 $commandLineArguments.val(e.data.command_line_arguments);
+            }
+            if (e.data.api_key) {
+                AUTH_HEADERS["Authorization"] = `Bearer ${e.data.api_key}`;
             }
         } else if (e.data.action === "run") {
             run();
@@ -1407,21 +1565,54 @@ public class Main {\n\
 }\n\
 ";
 
+const DEFAULT_STDIN = "";
+
 const DEFAULT_COMPILER_OPTIONS = "";
 const DEFAULT_CMD_ARGUMENTS = "";
-const DEFAULT_LANGUAGE_ID = 62; // Java
+const DEFAULT_LANGUAGE_ID = 62; // Java (OpenJDK 13.0.1)
 
-// Maps file extensions to language IDs for the "Open File" feature.
-// Only extensions matching SUPPORTED_LANGUAGES are included.
+function getEditorLanguageMode(languageName) {
+    const DEFAULT_EDITOR_LANGUAGE_MODE = "plaintext";
+    const LANGUAGE_NAME_TO_LANGUAGE_EDITOR_MODE = {
+        "Bash": "shell",
+        "C": "c",
+        "C3": "c",
+        "C#": "csharp",
+        "C++": "cpp",
+        "Clojure": "clojure",
+        "F#": "fsharp",
+        "Go": "go",
+        "Java": "java",
+        "JavaScript": "javascript",
+        "Kotlin": "kotlin",
+        "Objective-C": "objective-c",
+        "Pascal": "pascal",
+        "Perl": "perl",
+        "PHP": "php",
+        "Python": "python",
+        "R": "r",
+        "Ruby": "ruby",
+        "SQL": "sql",
+        "Swift": "swift",
+        "TypeScript": "typescript",
+        "Visual Basic": "vb"
+    }
+
+    for (let key in LANGUAGE_NAME_TO_LANGUAGE_EDITOR_MODE) {
+        if (languageName.toLowerCase().startsWith(key.toLowerCase())) {
+            return LANGUAGE_NAME_TO_LANGUAGE_EDITOR_MODE[key];
+        }
+    }
+    return DEFAULT_EDITOR_LANGUAGE_MODE;
+}
+
 const EXTENSIONS_TABLE = {
-    "java": { language_id: 62 },
-    "c":    { language_id: 103 },
-    "cpp":  { language_id: 105 },
-    "py":   { language_id: 71 },
-    "js":   { language_id: 102 },
-    "sh":   { language_id: 46 },
+    "java": { "flavor": CE, "language_id": 62 }, // Java (OpenJDK 13.0.1)
+    "c": { "flavor": CE, "language_id": 50 }, // C (GCC 9.2.0)
+    "py": { "flavor": CE, "language_id": 71 }, // Python (3.8.1)
+    "txt": { "flavor": CE, "language_id": 43 }, // Plain Text
 };
 
 function getLanguageForExtension(extension) {
-    return EXTENSIONS_TABLE[extension] || null;
+    return EXTENSIONS_TABLE[extension] || { "flavor": CE, "language_id": 43 }; // Plain Text (https://ce.judge0.com/languages/43)
 }
