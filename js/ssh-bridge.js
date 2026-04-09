@@ -2,28 +2,12 @@
 
 const express = require("express");
 const { Client } = require("ssh2");
-const { createProxyMiddleware } = require("http-proxy-middleware");
 const http = require("http");
 const path = require("path");
+const crypto = require("crypto");
+const WebSocket = require("ws");
 
 const app = express();
-
-// Judge0 auth token — lives here on the server, never sent to the browser
-const JUDGE0_AUTH_TOKEN = "yjjcWNpQGFQMkpmHQasOKegTvGL8yZ1sI4WM7YYkCuVoUwYt";
-
-// Proxy all /judge0/* requests to the Judge0 backend on port 2358
-// The browser calls /judge0/languages → this strips /judge0 and forwards to localhost:2358/languages
-// The proxy injects the X-Auth-Token header so the browser never needs to know the key
-app.use("/judge0", createProxyMiddleware({
-  target: "http://35.153.133.130:2358",
-  changeOrigin: true,
-  pathRewrite: { "^/judge0": "" },
-  on: {
-    proxyReq: (proxyReq) => {
-      proxyReq.setHeader("X-Auth-Token", JUDGE0_AUTH_TOKEN);
-    }
-  }
-}));
 
 // Enable JSON parsing
 app.use(express.json({ limit: "10kb" }));
@@ -158,7 +142,7 @@ app.post("/ssh-sign-in", (req, res) => {
 
     if (!responded) {
       responded = true;
-      res.json({ success: true, message: "SSH connection established" });
+      res.json({ success: true, token, message: "Signed in successfully" });
     }
   });
 
@@ -210,7 +194,7 @@ app.post("/ssh-sign-out", (req, res) => {
     console.log(`[SESSION REMOVED] token: ${token.substring(0, 8)}... for ${username}`);
     return res.json({ success: true, message: "Signed out successfully" });
   } else {
-    return res.status(400).json({ success: false, message: "No active SSH session" });
+    return res.status(400).json({ success: false, message: "No active session found" });
   }
 });
 
@@ -365,31 +349,7 @@ wss.on("connection", (ws, req) => {
         });
       });
     });
-  });
-}
-
-// List files and folders at a given path
-// Returns array of { name, type: "file"|"directory" }
-app.post("/ssh-ls", async (req, res) => {
-  const dir = req.body.path || "~";
-
-  try {
-    // ls -1F appends / to dirs, @ to symlinks, * to executables
-    const output = await sshExec(`ls -1aF ${JSON.stringify(dir)}`);
-    const entries = output.split("\n").filter(Boolean).map((entry) => {
-      if (entry === "./" || entry === "../") return null;
-
-      const isDir = entry.endsWith("/");
-      const name = entry.replace(/[/*@=|]$/, ""); // strip type indicators
-      return { name, type: isDir ? "directory" : "file" };
-    }).filter(Boolean);
-
-    res.json({ success: true, path: dir, entries });
-  } catch (err) {
-    console.error("[SSH-LS ERROR]", err.message);
-    res.json({ success: false, error: err.message });
   }
-});
 
   // ─────────────────────────────────────────────────────────────────────────
   // RUN MODE
@@ -528,18 +488,11 @@ app.post("/ssh-ls", async (req, res) => {
     });
   }
 
-  try {
-    // Base64 encode to safely handle special characters and newlines
-    const encoded = Buffer.from(content || "").toString("base64");
-    await sshExec(`echo ${JSON.stringify(encoded)} | base64 -d > ${JSON.stringify(filePath)}`);
-    res.json({ success: true, path: filePath });
-  } catch (err) {
-    console.error("[SSH-WRITE ERROR]", err.message);
-    res.json({ success: false, error: err.message });
-  }
+  ws.on("close", () => {
+    console.log(`[WS DISCONNECT] mode=${mode} token=${token.substring(0, 8)}...`);
+  });
 });
 
-// Start HTTP server on port 80
-http.createServer(app).listen(3000, "127.0.0.1", () => {
+httpServer.listen(3000, "0.0.0.0", () => {
   console.log("Server running on http://localhost:3000");
 });
