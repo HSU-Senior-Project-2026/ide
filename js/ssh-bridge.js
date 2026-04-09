@@ -248,9 +248,19 @@ wss.on("connection", (ws, req) => {
 
   console.log(`[WS CONNECT] mode=${mode} lang=${langId} token=${token ? token.substring(0, 8) + "..." : "none"}`);
 
-  // Auth gate — reject immediately if the token is not in the sessions Map.
+  // Auth gate — reject immediately if the token is not in the sessions Map,
+  // or if the underlying ssh2.Client has died since sign-in. Either case forces
+  // the student to sign in again, which opens a fresh connection.
   if (!token || !sessions.has(token)) {
     ws.send("ERROR: Not signed in. Please sign in before running code.\r\n");
+    ws.close();
+    return;
+  }
+
+  const session = sessions.get(token);
+
+  if (!session.ready || !session.sshClient) {
+    ws.send("ERROR: Your SSH connection has expired. Please sign in again.\r\n");
     ws.close();
     return;
   }
@@ -261,15 +271,21 @@ wss.on("connection", (ws, req) => {
     return;
   }
 
-  const session = sessions.get(token);
+  // Any successful WS connection counts as activity — reset the idle-reap timer.
+  touchSession(token);
+
+  // One shared ssh2.Client is reused across compile/run/shell/file-ops.
+  // ssh2 multiplexes channels natively, so opening exec() or shell() on this
+  // client creates an independent channel without a new TCP/SSH handshake.
+  const sshClient = session.sshClient;
 
   // ─────────────────────────────────────────────────────────────────────────
   // COMPILE MODE
   // The browser sends source code as the first WebSocket message.
-  // We SSH to the CSCI server, write the file, run the compiler, and stream
-  // all output back. When done we close the WebSocket with code 4000 (success)
-  // or 4001 (failure). The browser checks this code to decide whether to
-  // enable the Run button.
+  // We open an exec channel on the shared client, write the file, run the
+  // compiler, and stream all output back. When done we close the WebSocket
+  // with code 4000 (success) or 4001 (failure). The browser checks this code
+  // to decide whether to enable the Run button.
   // ─────────────────────────────────────────────────────────────────────────
   if (mode === "compile") {
     const lang = LANGUAGE_COMMANDS[langId];
@@ -282,75 +298,64 @@ wss.on("connection", (ws, req) => {
     // Wait for exactly one message containing the raw source code.
     ws.once("message", (rawData) => {
       const sourceCode = rawData.toString();
-      const { username, password } = session;
+      const { username } = session;
 
       // Each student gets a unique temp directory based on their session token.
       // Using token.substring(0,16) keeps the path short while still being unique.
       const tmpDir = `/tmp/judge0_${token.substring(0, 16)}`;
 
-      const conn = new Client();
+      // Base64-encode the source code in Node before sending it to the shell.
+      // This means no matter what characters the student typed — quotes,
+      // backslashes, dollar signs — the file is written safely without any
+      // shell interpretation. printf decodes it byte-for-byte on the other end.
+      const b64 = Buffer.from(sourceCode).toString("base64");
 
-      conn.on("ready", () => {
-        // Base64-encode the source code in Node before sending it to the shell.
-        // This means no matter what characters the student typed — quotes,
-        // backslashes, dollar signs — the file is written safely without any
-        // shell interpretation. printf decodes it byte-for-byte on the other end.
-        const b64 = Buffer.from(sourceCode).toString("base64");
+      // Build the full command string:
+      // 1. Delete any previous compile attempt for this student
+      // 2. Create a fresh temp directory
+      // 3. Decode the base64 source into the correct filename
+      // 4. If a compile command exists, run it; otherwise skip (interpreted languages)
+      const compileStep = lang.compile ? ` && cd ${tmpDir} && ${lang.compile}` : "";
+      const fullCmd = `rm -rf ${tmpDir} && mkdir -p ${tmpDir} && printf '%s' '${b64}' | base64 -d > ${tmpDir}/${lang.file}${compileStep}`;
 
-        // Build the full command string:
-        // 1. Delete any previous compile attempt for this student
-        // 2. Create a fresh temp directory
-        // 3. Decode the base64 source into the correct filename
-        // 4. If a compile command exists, run it; otherwise skip (interpreted languages)
-        const compileStep = lang.compile ? ` && cd ${tmpDir} && ${lang.compile}` : "";
-        const fullCmd = `rm -rf ${tmpDir} && mkdir -p ${tmpDir} && printf '%s' '${b64}' | base64 -d > ${tmpDir}/${lang.file}${compileStep}`;
+      console.log(`[COMPILE] user=${username} dir=${tmpDir} lang=${langId}`);
 
-        console.log(`[COMPILE] user=${username} dir=${tmpDir} lang=${langId}`);
+      // exec() opens a new channel on the shared client — NOT a new connection.
+      // Do NOT call sshClient.end() anywhere in this handler; the client must
+      // outlive this channel so other operations can reuse it.
+      sshClient.exec(fullCmd, (err, stream) => {
+        if (err) {
+          ws.send(`ERROR: Could not start compile: ${err.message}\r\n`);
+          ws.close(4001, "exec-error");
+          return;
+        }
 
-        conn.exec(fullCmd, (err, stream) => {
-          if (err) {
-            ws.send(`ERROR: Could not start compile: ${err.message}\r\n`);
-            ws.close(4001, "exec-error");
-            conn.end();
-            return;
+        // Stream stdout and stderr directly to the browser as they arrive.
+        stream.on("data", (data) => ws.send(data.toString()));
+        stream.stderr.on("data", (data) => ws.send(data.toString()));
+
+        stream.on("close", (exitCode) => {
+          if (exitCode === 0) {
+            // Store the temp dir and language in the session so run() can find them.
+            session.tmpDir  = tmpDir;
+            session.langId  = langId;
+            console.log(`[COMPILE SUCCESS] user=${username}`);
+            ws.close(4000, "success"); // 4000 signals success to the browser
+          } else {
+            session.tmpDir = null;
+            console.log(`[COMPILE FAILED] user=${username} exitCode=${exitCode}`);
+            ws.close(4001, "failed");  // 4001 signals failure to the browser
           }
-
-          // Stream stdout and stderr directly to the browser as they arrive.
-          stream.on("data", (data) => ws.send(data.toString()));
-          stream.stderr.on("data", (data) => ws.send(data.toString()));
-
-          stream.on("close", (exitCode) => {
-            conn.end();
-            if (exitCode === 0) {
-              // Store the temp dir and language in the session so run() can find them.
-              session.tmpDir  = tmpDir;
-              session.langId  = langId;
-              console.log(`[COMPILE SUCCESS] user=${username}`);
-              ws.close(4000, "success"); // 4000 signals success to the browser
-            } else {
-              session.tmpDir = null;
-              console.log(`[COMPILE FAILED] user=${username} exitCode=${exitCode}`);
-              ws.close(4001, "failed");  // 4001 signals failure to the browser
-            }
-          });
         });
       });
-
-      conn.on("error", (err) => {
-        console.log(`[COMPILE SSH ERROR] ${err.message}`);
-        ws.send(`SSH ERROR: ${err.message}\r\n`);
-        ws.close(4001, "ssh-error");
-      });
-
-      conn.connect({ host: "csci.hsutx.edu", port: 22, username, password, readyTimeout: 10000 });
     });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // RUN MODE
-  // We SSH to the CSCI server and exec the run command with a PTY so the
-  // program behaves exactly like it would in a real terminal — scanf/Scanner
-  // prompts appear immediately, the cursor works, etc.
+  // We open an exec channel on the shared client with a PTY so the program
+  // behaves exactly like it would in a real terminal — scanf/Scanner prompts
+  // appear immediately, the cursor works, etc.
   // Data flows in both directions for the lifetime of the connection:
   //   SSH stdout → WebSocket → xterm.js
   //   xterm.js keystrokes → WebSocket → SSH stdin
@@ -363,156 +368,124 @@ wss.on("connection", (ws, req) => {
     }
 
     const lang     = LANGUAGE_COMMANDS[session.langId];
-    const { username, password, tmpDir } = session;
+    const { username, tmpDir } = session;
 
-    const conn = new Client();
+    // Build the run command using exec so that the student's program *replaces*
+    // the shell process and becomes the direct owner of the PTY. This is critical
+    // for interactive I/O: without exec, the program runs as a grandchild process
+    // that is NOT in the PTY's foreground process group, which causes reads from
+    // stdin to hang after the first input (the terminal driver sends SIGTTIN to
+    // background processes attempting to read).
+    //
+    // Previously we used `timeout 30` here, but GNU timeout creates a new process
+    // group for its child by default, which broke the PTY foreground group ownership
+    // and caused Scanner/scanf/input() to freeze after the first interactive read.
+    //
+    //   ulimit -t 10  — CPU time limit; catches infinite loops
+    //   exec          — replaces the shell with the program so it owns the PTY
+    //
+    // Wall-clock timeout is enforced in Node.js below (RUN_TIMEOUT_MS) instead of
+    // relying on the `timeout` command, since we need the program to be the PTY
+    // session leader for interactive I/O to work correctly.
+    const runCmd = `ulimit -t 10 && cd ${tmpDir} && exec ${lang.run}`;
 
-    conn.on("ready", () => {
-      // Build the run command using exec so that the student's program *replaces*
-      // the shell process and becomes the direct owner of the PTY. This is critical
-      // for interactive I/O: without exec, the program runs as a grandchild process
-      // that is NOT in the PTY's foreground process group, which causes reads from
-      // stdin to hang after the first input (the terminal driver sends SIGTTIN to
-      // background processes attempting to read).
-      //
-      // Previously we used `timeout 30` here, but GNU timeout creates a new process
-      // group for its child by default, which broke the PTY foreground group ownership
-      // and caused Scanner/scanf/input() to freeze after the first interactive read.
-      //
-      //   ulimit -t 10  — CPU time limit; catches infinite loops
-      //   exec          — replaces the shell with the program so it owns the PTY
-      //
-      // Wall-clock timeout is enforced in Node.js below (RUN_TIMEOUT_MS) instead of
-      // relying on the `timeout` command, since we need the program to be the PTY
-      // session leader for interactive I/O to work correctly.
-      const runCmd = `ulimit -t 10 && cd ${tmpDir} && exec ${lang.run}`;
+    console.log(`[RUN] user=${username} dir=${tmpDir}`);
 
-      console.log(`[RUN] user=${username} dir=${tmpDir}`);
+    sshClient.exec(runCmd, { pty: { term: "xterm-256color", cols: 220, rows: 50 } }, (err, stream) => {
+      if (err) {
+        ws.send(`ERROR: Could not start program: ${err.message}\r\n`);
+        ws.close();
+        return;
+      }
 
-      conn.exec(runCmd, { pty: { term: "xterm-256color", cols: 220, rows: 50 } }, (err, stream) => {
-        if (err) {
-          ws.send(`ERROR: Could not start program: ${err.message}\r\n`);
+      // Wall-clock timeout — kills the program if it runs longer than 30 seconds.
+      // This replaces the GNU `timeout` command that we can no longer use (see above).
+      const RUN_TIMEOUT_MS = 30000;
+      const runTimer = setTimeout(() => {
+        console.log(`[RUN TIMEOUT] user=${username} — killed after ${RUN_TIMEOUT_MS / 1000}s`);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send("\r\n[Program killed: exceeded 30 second time limit]\r\n");
           ws.close();
-          conn.end();
-          return;
         }
+        // Close only this channel — the shared client keeps running for other ops.
+        stream.close();
+      }, RUN_TIMEOUT_MS);
 
-        // Wall-clock timeout — kills the program if it runs longer than 30 seconds.
-        // This replaces the GNU `timeout` command that we can no longer use (see above).
-        const RUN_TIMEOUT_MS = 30000;
-        const runTimer = setTimeout(() => {
-          console.log(`[RUN TIMEOUT] user=${username} — killed after ${RUN_TIMEOUT_MS / 1000}s`);
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send("\r\n[Program killed: exceeded 30 second time limit]\r\n");
-            ws.close();
-          }
-          stream.close();
-          conn.end();
-        }, RUN_TIMEOUT_MS);
+      // SSH → browser: forward every byte of program output to the terminal.
+      stream.on("data", (data) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(data.toString());
+      });
 
-        // SSH → browser: forward every byte of program output to the terminal.
-        stream.on("data", (data) => {
-          if (ws.readyState === WebSocket.OPEN) ws.send(data.toString());
-        });
+      // browser → SSH: forward every keystroke from xterm.js to the program.
+      ws.on("message", (data) => {
+        stream.write(data.toString());
+      });
 
-        // browser → SSH: forward every keystroke from xterm.js to the program.
-        ws.on("message", (data) => {
-          stream.write(data.toString());
-        });
+      // Program finished normally.
+      stream.on("close", () => {
+        clearTimeout(runTimer);
+        console.log(`[RUN FINISHED] user=${username}`);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send("\r\n[Program exited]\r\n");
+          ws.close();
+        }
+      });
 
-        // Program finished normally.
-        stream.on("close", () => {
-          clearTimeout(runTimer);
-          console.log(`[RUN FINISHED] user=${username}`);
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send("\r\n[Program exited]\r\n");
-            ws.close();
-          }
-          conn.end();
-        });
-
-        // Browser closed the tab or clicked something that killed the connection.
-        // Kill the remote process too so it doesn't linger on the server.
-        ws.on("close", () => {
-          clearTimeout(runTimer);
-          console.log(`[RUN ABORTED] user=${username}`);
-          stream.close();
-          conn.end();
-        });
+      // Browser closed this WS (tab closed, user clicked stop, etc.). Kill only
+      // this channel so the program stops — do NOT tear down the shared client.
+      ws.on("close", () => {
+        clearTimeout(runTimer);
+        console.log(`[RUN ABORTED] user=${username}`);
+        stream.close();
       });
     });
-
-    conn.on("error", (err) => {
-      console.log(`[RUN SSH ERROR] ${err.message}`);
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(`SSH ERROR: ${err.message}\r\n`);
-        ws.close();
-      }
-    });
-
-    conn.connect({ host: "csci.hsutx.edu", port: 22, username, password, readyTimeout: 10000 });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // SHELL MODE
-  // Opens a full interactive login shell on the CSCI server. The student can
-  // run any command — ls, git, vim, gcc, etc. — just like a normal SSH session.
-  // Data flows bidirectionally between xterm.js and the shell for the lifetime
-  // of the connection.
+  // Opens a full interactive login shell on the CSCI server as a new channel
+  // on the shared client. The student can run any command — ls, git, vim,
+  // gcc, etc. — just like a normal SSH session. Data flows bidirectionally
+  // between xterm.js and the shell for the lifetime of the WebSocket.
   // ─────────────────────────────────────────────────────────────────────────
   if (mode === "shell") {
-    const { username, password } = session;
-    const conn = new Client();
+    const { username } = session;
 
-    conn.on("ready", () => {
-      console.log(`[SHELL] user=${username}`);
+    console.log(`[SHELL] user=${username}`);
 
-      conn.shell({ term: "xterm-256color", cols: 220, rows: 50 }, (err, stream) => {
-        if (err) {
-          ws.send(`ERROR: Could not open shell: ${err.message}\r\n`);
+    sshClient.shell({ term: "xterm-256color", cols: 220, rows: 50 }, (err, stream) => {
+      if (err) {
+        ws.send(`ERROR: Could not open shell: ${err.message}\r\n`);
+        ws.close();
+        return;
+      }
+
+      // Shell → browser
+      stream.on("data", (data) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(data.toString());
+      });
+
+      // Browser keystrokes → shell
+      ws.on("message", (data) => {
+        stream.write(data.toString());
+      });
+
+      // Shell exited (student typed "exit" or the channel dropped).
+      stream.on("close", () => {
+        console.log(`[SHELL CLOSED] user=${username}`);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send("\r\n[Shell session ended]\r\n");
           ws.close();
-          conn.end();
-          return;
         }
+      });
 
-        // Shell → browser
-        stream.on("data", (data) => {
-          if (ws.readyState === WebSocket.OPEN) ws.send(data.toString());
-        });
-
-        // Browser keystrokes → shell
-        ws.on("message", (data) => {
-          stream.write(data.toString());
-        });
-
-        // Shell exited (student typed "exit" or the connection dropped).
-        stream.on("close", () => {
-          console.log(`[SHELL CLOSED] user=${username}`);
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send("\r\n[Shell session ended]\r\n");
-            ws.close();
-          }
-          conn.end();
-        });
-
-        // Browser disconnected — tear down the SSH connection.
-        ws.on("close", () => {
-          console.log(`[SHELL ABORTED] user=${username}`);
-          stream.close();
-          conn.end();
-        });
+      // Browser disconnected — close only this channel. The shared client
+      // stays alive for future compile/run/shell operations.
+      ws.on("close", () => {
+        console.log(`[SHELL ABORTED] user=${username}`);
+        stream.close();
       });
     });
-
-    conn.on("error", (err) => {
-      console.log(`[SHELL SSH ERROR] ${err.message}`);
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(`SSH ERROR: ${err.message}\r\n`);
-        ws.close();
-      }
-    });
-
-    conn.connect({ host: "csci.hsutx.edu", port: 22, username, password, readyTimeout: 10000 });
   }
 
   ws.on("close", () => {
