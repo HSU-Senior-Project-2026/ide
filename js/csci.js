@@ -122,4 +122,40 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("judge0-csci-modal-sign-in-btn").addEventListener("click", signIn);
   document.getElementById("judge0-csci-modal-sign-in-cancel-btn").addEventListener("click", hideSignInModal);
   document.getElementById("judge0-csci-sign-out-btn").addEventListener("click", signOut);
+
+  // Tab-close / navigation-away sign-out.
+  //
+  // With Layer 1 (persistent SSH connection per session), every signed-in
+  // student holds an open SSH channel to csci.hsutx.edu on the server. If
+  // they just close the tab, the server wouldn't know to tear that down
+  // until the 30-minute idle-reap timer fires. sendBeacon lets us fire a
+  // best-effort POST to /ssh-sign-out during page unload — the browser
+  // guarantees delivery even as the page dies, and it doesn't block the
+  // close. The server handles the sign-out exactly like a normal one
+  // (invalidateSession → sshClient.end → delete from Map).
+  //
+  // Notes:
+  // - 'pagehide' fires more reliably than 'beforeunload' on mobile and with
+  //   back/forward cache, so we register both and let whichever fires first
+  //   do the work. The server endpoint is idempotent (a second sign-out
+  //   just returns "no active session").
+  // - sendBeacon requires a Blob with the correct Content-Type for Express's
+  //   json middleware to parse the body.
+  // - If csciSessionToken is null (never signed in, or already signed out)
+  //   we skip — nothing to clean up.
+  function beaconSignOut() {
+    if (!window.csciSessionToken) return;
+    try {
+      const payload = new Blob(
+        [JSON.stringify({ token: window.csciSessionToken })],
+        { type: "application/json" }
+      );
+      navigator.sendBeacon("/ssh-sign-out", payload);
+    } catch (err) {
+      // Nothing we can do during unload — page is going away regardless.
+      console.warn("sendBeacon sign-out failed:", err);
+    }
+  }
+  window.addEventListener("pagehide", beaconSignOut);
+  window.addEventListener("beforeunload", beaconSignOut);
 });
