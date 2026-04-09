@@ -26,16 +26,68 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "index.html"));
 });
 
-// Map of session tokens → { username, password }
-// Each student who signs in gets a unique token stored here.
-// When they click Run, they present their token so we know whose credentials to use.
+// Map of session tokens → {
+//   username, password,          ← credentials (password kept for potential future reconnect)
+//   sshClient,                   ← live ssh2.Client, opened at sign-in and reused
+//   ready,                       ← false if the client has died/closed
+//   tmpDir, langId,              ← populated by compile; consumed by run
+//   lastActivity, inactivityTimer ← idle-reaping bookkeeping
+// }
+//
+// Layer 1 model: one live SSH connection per signed-in student. Compile, run,
+// shell, and (future) file ops all multiplex new channels over that single
+// connection, so we only pay the SSH handshake once per session instead of
+// once per click. Connections are torn down on explicit sign-out, on idle
+// timeout, or when the underlying ssh2.Client emits 'close'/'error'.
 const sessions = new Map();
 
+// Idle timeout — if a student takes no action for this long, we reap their
+// SSH connection. They'll be forced to sign in again on their next action.
+// 30 minutes is generous for classroom use (lecture pauses, student walks away)
+// but short enough that abandoned tabs don't hold server connections forever.
+const INACTIVITY_MS = 30 * 60 * 1000;
+
+// Mark a session as recently active and (re)arm its idle-reap timer.
+// Called from sign-in and from every WS handler entry. Safe to call on a
+// missing/invalidated session — it just no-ops.
+function touchSession(token) {
+  const session = sessions.get(token);
+  if (!session) return;
+  session.lastActivity = Date.now();
+  if (session.inactivityTimer) clearTimeout(session.inactivityTimer);
+  session.inactivityTimer = setTimeout(() => {
+    console.log(`[SESSION IDLE TIMEOUT] token: ${token.substring(0, 8)}... user=${session.username}`);
+    invalidateSession(token, "idle-timeout");
+  }, INACTIVITY_MS);
+}
+
+// Tear down a session: end the SSH client (best-effort), clear its idle timer,
+// and remove it from the map. Used for explicit sign-out, idle timeout, and
+// unexpected client death ('close'/'error' on the ssh2.Client). Reason is
+// logged for debugging. Safe to call on an already-missing token.
+function invalidateSession(token, reason) {
+  const session = sessions.get(token);
+  if (!session) return;
+  console.log(`[SESSION INVALIDATED] token: ${token.substring(0, 8)}... user=${session.username} reason=${reason}`);
+  session.ready = false;
+  if (session.inactivityTimer) {
+    clearTimeout(session.inactivityTimer);
+    session.inactivityTimer = null;
+  }
+  if (session.sshClient) {
+    try { session.sshClient.end(); } catch (_) { /* already closed — ignore */ }
+    session.sshClient = null;
+  }
+  sessions.delete(token);
+}
+
 // SSH endpoint for sign-in
-// Opens a test SSH connection to validate credentials. On success, generates
-// a unique session token, stores the credentials under that token, closes the
-// test connection, and returns the token to the browser. The browser holds
-// this token and presents it every time the student clicks Run.
+// Opens a live SSH connection to validate credentials and KEEPS IT OPEN for
+// the lifetime of the session. The browser gets back a token that it presents
+// on every subsequent operation; the server looks the token up, reuses the
+// already-open ssh2.Client, and runs the new command as a fresh channel over
+// the existing connection. This means we pay the ~300-800ms SSH handshake
+// exactly once per sign-in instead of once per click.
 app.post("/ssh-sign-in", (req, res) => {
   const { username, password } = req.body;
 
@@ -56,12 +108,37 @@ app.post("/ssh-sign-in", (req, res) => {
     // never receive the same token.
     const token = crypto.randomBytes(32).toString("hex");
 
-    // Store the credentials mapped to this token. We close the test connection
-    // below — we don't keep it open. A fresh connection is made on each Run.
-    sessions.set(token, { username, password });
+    // Store the LIVE client in the session — do not call conn.end() here.
+    // This connection will be reused by every compile/run/shell/file-op until
+    // the user signs out, the session goes idle, or the client dies.
+    sessions.set(token, {
+      username,
+      password,
+      sshClient: conn,
+      ready: true,
+      tmpDir: null,
+      langId: null,
+      lastActivity: Date.now(),
+      inactivityTimer: null,
+    });
     console.log(`[SESSION CREATED] token: ${token.substring(0, 8)}... for ${username}`);
 
-    conn.end(); // close the validation connection, credentials are now stored
+    // Arm the idle-reap timer. Every WS handler entry touches the session,
+    // which resets this — so an active user never gets reaped mid-lesson.
+    touchSession(token);
+
+    // Attach long-lived listeners for unexpected death AFTER the validation
+    // response goes out. The 'responded' flag below guarantees the validation
+    // 'error' handler can't double-respond if the connection dies later.
+    conn.on("close", () => {
+      console.log(`[SSH CLIENT CLOSED] user=${username} token=${token.substring(0, 8)}...`);
+      invalidateSession(token, "client-closed");
+    });
+    conn.on("end", () => {
+      console.log(`[SSH CLIENT ENDED] user=${username} token=${token.substring(0, 8)}...`);
+      // 'end' usually precedes 'close'; invalidate is idempotent so double-calls are safe.
+      invalidateSession(token, "client-ended");
+    });
 
     if (!responded) {
       responded = true;
@@ -70,10 +147,21 @@ app.post("/ssh-sign-in", (req, res) => {
   });
 
   conn.on("error", (err) => {
-    console.log(`[SSH LOGIN FAILED] ${err.message}`);
+    console.log(`[SSH ERROR] ${err.message}`);
     if (!responded) {
+      // Validation-phase failure — tell the browser login failed.
       responded = true;
       res.json({ success: false, error: "SSH connection failed: " + err.message });
+    } else {
+      // Post-validation failure — the live connection died out from under us.
+      // Find the token for this client and invalidate. O(n) in sessions count,
+      // but n is small (one per signed-in student) so this is fine.
+      for (const [token, session] of sessions.entries()) {
+        if (session.sshClient === conn) {
+          invalidateSession(token, "client-error: " + err.message);
+          break;
+        }
+      }
     }
   });
 
@@ -83,18 +171,26 @@ app.post("/ssh-sign-in", (req, res) => {
     username,
     password,
     readyTimeout: 10000,
+    // Send an SSH keepalive packet every 30s and drop the connection if the
+    // server fails to respond to 3 in a row (~90s). Prevents NAT devices and
+    // sshd's ClientAliveInterval from silently killing idle connections.
+    keepaliveInterval: 30000,
+    keepaliveCountMax: 3,
   });
 });
 
 // SSH endpoint for sign-out
-// Removes the student's token from the sessions Map. After this, any attempt
-// to open a WebSocket with that token will be rejected.
+// Tears down the live SSH connection and removes the session. After this,
+// any attempt to open a WebSocket with the same token hits the auth gate in
+// the WS handler and is rejected. Also called via navigator.sendBeacon from
+// the browser's 'beforeunload' event so closing the tab drops the connection
+// instead of waiting for the idle-reap timer.
 app.post("/ssh-sign-out", (req, res) => {
   const { token } = req.body;
 
   if (token && sessions.has(token)) {
     const { username } = sessions.get(token);
-    sessions.delete(token);
+    invalidateSession(token, "sign-out");
     console.log(`[SESSION REMOVED] token: ${token.substring(0, 8)}... for ${username}`);
     return res.json({ success: true, message: "Signed out successfully" });
   } else {
