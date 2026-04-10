@@ -6,6 +6,7 @@ const http = require("http");
 const path = require("path");
 const crypto = require("crypto");
 const WebSocket = require("ws");
+const loginAttempts = new Map(); 
 
 const app = express();
 
@@ -90,29 +91,66 @@ function invalidateSession(token, reason) {
 // exactly once per sign-in instead of once per click.
 app.post("/ssh-sign-in", (req, res) => {
   const { username, password } = req.body;
+  const now = Date.now();
 
   if (!username || !password) {
     return res.json({ success: false, error: "Username or password missing" });
   }
 
-  console.log(`[SSH LOGIN ATTEMPT] From ${req.ip}`);
+  const key = username.trim().toLowerCase();
+
+  const attempt = loginAttempts.get(key) || { count: 0, lockUntil: 0 };
+
+  // 🔒 lock check
+  if (attempt.lockUntil && now < attempt.lockUntil) {
+    return res.json({
+      success: false,
+      error: `Too many failed attempts. Try again in ${Math.ceil((attempt.lockUntil - now) / 60000)} minutes`
+    });
+  }
 
   const conn = new Client();
+
   let responded = false;
+  let hasFailed = false; // ⭐关键：防重复计数
+
+  function failOnce(errMsg) {
+    if (responded || hasFailed) return;
+    hasFailed = true;
+    responded = true;
+
+    const a = loginAttempts.get(key) || { count: 0, lockUntil: 0 };
+
+    a.count += 1;
+
+    console.log(`[LOGIN FAIL] user=${key} count=${a.count}`);
+
+    if (a.count >= 3) {
+      a.lockUntil = Date.now() + 10 * 60 * 1000;
+      a.count = 0;
+      console.log(`[LOGIN LOCKED] user=${key} for 10 min`);
+    }
+
+    loginAttempts.set(key, a);
+
+    try { conn.end(); } catch (_) {}
+
+    return res.json({
+      success: false,
+      error: "SSH login failed: " + errMsg
+    });
+  }
 
   conn.on("ready", () => {
-    console.log(`[SSH LOGIN SUCCESS] username: ${username}`);
+    if (responded) return;
+    responded = true;
 
-    // Generate a cryptographically random token — 32 random bytes turned into
-    // a 64-character hex string. This is unique enough that two students will
-    // never receive the same token.
+    loginAttempts.delete(key);
+
     const token = crypto.randomBytes(32).toString("hex");
 
-    // Store the LIVE client in the session — do not call conn.end() here.
-    // This connection will be reused by every compile/run/shell/file-op until
-    // the user signs out, the session goes idle, or the client dies.
     sessions.set(token, {
-      username,
+      username: key,
       password,
       sshClient: conn,
       ready: true,
@@ -121,49 +159,17 @@ app.post("/ssh-sign-in", (req, res) => {
       lastActivity: Date.now(),
       inactivityTimer: null,
     });
-    console.log(`[SESSION CREATED] token: ${token.substring(0, 8)}... for ${username}`);
 
-    // Arm the idle-reap timer. Every WS handler entry touches the session,
-    // which resets this — so an active user never gets reaped mid-lesson.
-    touchSession(token);
+    conn.on("close", () => invalidateSession(token, "client-closed"));
+    conn.on("end", () => invalidateSession(token, "client-ended"));
 
-    // Attach long-lived listeners for unexpected death AFTER the validation
-    // response goes out. The 'responded' flag below guarantees the validation
-    // 'error' handler can't double-respond if the connection dies later.
-    conn.on("close", () => {
-      console.log(`[SSH CLIENT CLOSED] user=${username} token=${token.substring(0, 8)}...`);
-      invalidateSession(token, "client-closed");
-    });
-    conn.on("end", () => {
-      console.log(`[SSH CLIENT ENDED] user=${username} token=${token.substring(0, 8)}...`);
-      // 'end' usually precedes 'close'; invalidate is idempotent so double-calls are safe.
-      invalidateSession(token, "client-ended");
-    });
-
-    if (!responded) {
-      responded = true;
-      res.json({ success: true, token, message: "Signed in successfully" });
-    }
+    return res.json({ success: true, token });
   });
 
-  conn.on("error", (err) => {
-    console.log(`[SSH ERROR] ${err.message}`);
-    if (!responded) {
-      // Validation-phase failure — tell the browser login failed.
-      responded = true;
-      res.json({ success: false, error: "SSH connection failed: " + err.message });
-    } else {
-      // Post-validation failure — the live connection died out from under us.
-      // Find the token for this client and invalidate. O(n) in sessions count,
-      // but n is small (one per signed-in student) so this is fine.
-      for (const [token, session] of sessions.entries()) {
-        if (session.sshClient === conn) {
-          invalidateSession(token, "client-error: " + err.message);
-          break;
-        }
-      }
-    }
-  });
+  // ⭐ 所有失败入口统一
+  conn.on("error", (err) => failOnce(err.message));
+  conn.on("close", () => failOnce("connection closed"));
+  conn.on("end", () => failOnce("connection ended"));
 
   conn.connect({
     host: "csci.hsutx.edu",
@@ -171,9 +177,6 @@ app.post("/ssh-sign-in", (req, res) => {
     username,
     password,
     readyTimeout: 10000,
-    // Send an SSH keepalive packet every 30s and drop the connection if the
-    // server fails to respond to 3 in a row (~90s). Prevents NAT devices and
-    // sshd's ClientAliveInterval from silently killing idle connections.
     keepaliveInterval: 30000,
     keepaliveCountMax: 3,
   });
