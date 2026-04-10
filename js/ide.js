@@ -1425,3 +1425,17 @@ const EXTENSIONS_TABLE = {
 function getLanguageForExtension(extension) {
     return EXTENSIONS_TABLE[extension] || null;
 }
+
+window.increaseFont = function () {
+    if (fontSize < 32) {
+        fontSize += 2;
+        setFontSizeForAllEditors(fontSize);
+    }
+};
+
+window.decreaseFont = function () {
+    if (fontSize > 8) {
+        fontSize -= 2;
+        setFontSizeForAllEditors(fontSize);
+    }
+};
