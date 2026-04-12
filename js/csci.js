@@ -71,8 +71,9 @@ async function signIn(e) {
       // This token is required for future authenticated actions
       // like reading, writing, compiling, and running code.
       window.sshToken = result.token;
-
       console.log("SSH token saved:", window.sshToken);
+
+      loadFileExplorer("~");
 
     } else {
       showNotification("Login failed: " + result.error, "error");
@@ -115,6 +116,125 @@ async function signOut() {
     document.getElementById("judge0-account-label").textContent = "Account";
     document.getElementById("judge0-csci-sign-in-btn").style.display = "";
     document.getElementById("judge0-csci-sign-out-btn").style.display = "none";
+  }
+}
+
+// Load files from the user's home directory and render them in the Explorer
+async function loadFileExplorer(path = "~") {
+  console.log("loadFileExplorer called with path:", path);
+
+  if (!window.sshToken) {
+    console.error("No SSH token found.");
+    return;
+  }
+
+  try {
+    console.log("Sending /ssh-ls request...");
+
+    const response = await fetch("/ssh-ls", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: window.sshToken,
+        path
+      })
+    });
+
+    console.log("Received response from /ssh-ls:", response.status);
+
+    const result = await response.json();
+    console.log("ssh-ls result:", result);
+
+    if (!result.success) {
+      console.error("Failed to load files:", result.error);
+      return;
+    }
+
+    renderFileExplorer(result.entries, result.path);
+  } catch (err) {
+    console.error("Error loading file explorer:", err);
+  }
+}
+
+// Render file/folder entries into the Explorer sidebar
+function renderFileExplorer(entries, currentPath) {
+  console.log("renderFileExplorer called");
+  console.log("Entries being rendered:", entries);
+
+  const container = document.getElementById("file-explorer-list");
+  console.log("Explorer container:", container);
+  
+  if (!container) {
+    console.error("Explorer container not found.");
+    return;
+  }
+
+  container.innerHTML = "";
+
+  entries.forEach((entry) => {
+    const item = document.createElement("div");
+    item.className = "file-explorer-item";
+    item.textContent = entry.type === "directory" ? `📁 ${entry.name}` : `📄 ${entry.name}`;
+
+    item.addEventListener("click", () => {
+      if (entry.type === "directory") {
+        const nextPath =
+          entry.name === ".."
+            ? currentPath + "/.."
+            : `${currentPath}/${entry.name}`;
+        loadFileExplorer(nextPath);
+      } else {
+        const filePath = `${currentPath}/${entry.name}`;
+        openServerFile(filePath, entry.name);
+      }
+    });
+
+    container.appendChild(item);
+  });
+}
+
+// Open a file from the server and load it into Monaco
+async function openServerFile(filePath, fileName) {
+  if (!window.sshToken) {
+    console.error("No SSH token found.");
+    return;
+  }
+
+  try {
+    const response = await fetch("/ssh-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: window.sshToken,
+        path: filePath
+      })
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+      console.error("Failed to read file:", result.error);
+      return;
+    }
+
+    if (!window.sourceEditor) {
+      console.error("Editor not initialized.");
+      return;
+    }
+
+    window.sourceEditor.setValue(result.content);
+
+    // Optional: track current open file for saving later
+    window.currentOpenFilePath = result.path;
+    window.currentOpenFileName = fileName;
+
+    // Optional: update tab title if you already have a tab label element
+    const tabLabel = document.querySelector(".lm_title");
+    if (tabLabel) {
+      tabLabel.textContent = fileName;
+    }
+  } catch (err) {
+    console.error("Error opening file:", err);
   }
 }
 
