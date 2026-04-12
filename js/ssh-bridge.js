@@ -488,13 +488,13 @@ app.post("/ssh-ls", async (req, res) => {
     // - permissions
     const output = await sshExecForToken(
       token,
-      `ls -laF ${JSON.stringify(resolvedDir)}`
+      `ls -F ${JSON.stringify(resolvedDir)}`
     );
 
     const lines = output.split("\n").filter(Boolean);
     const entries = [];
 
-    for (const line of lines) {
+    /*for (const line of lines) {
       // Skip "total N"
       if (line.startsWith("total ")) continue;
 
@@ -528,6 +528,27 @@ app.post("/ssh-ls", async (req, res) => {
         type: isDir ? "directory" : "file",
         readable: permStr.charAt(1) === "r",
         writable: permStr.charAt(2) === "w"
+      });
+    }*/
+
+    if (!isHome) {
+      entries.push({
+        name: "..",
+        type: "directory",
+        readable: true,
+        writable: true
+      });
+    }
+
+    for (const line of lines) {
+      const isDir = line.endsWith("/");
+      const name = line.replace(/[/*@=|]$/, "");
+
+      entries.push({
+        name,
+        type: isDir ? "directory" : "file",
+        readable: true,
+        writable: true
       });
     }
 
