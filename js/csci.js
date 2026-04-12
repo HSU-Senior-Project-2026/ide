@@ -66,6 +66,14 @@ async function signIn(e) {
       document.getElementById("judge0-account-label").textContent = displayName;
       document.getElementById("judge0-csci-sign-in-btn").style.display = "none";
       document.getElementById("judge0-csci-sign-out-btn").style.display = "";
+
+      // Save the SSH session token returned by the backend.
+      // This token is required for future authenticated actions
+      // like reading, writing, compiling, and running code.
+      window.sshToken = result.token;
+
+      console.log("SSH token saved:", window.sshToken);
+
     } else {
       showNotification("Login failed: " + result.error, "error");
     }
