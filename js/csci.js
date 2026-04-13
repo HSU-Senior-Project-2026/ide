@@ -1,6 +1,27 @@
 
 //--------------------------------------------------
 
+/*// Allow Ctrl+S / Cmd+S to save the currently open file.
+document.addEventListener("keydown", (event) => {
+  console.log("keydown detected:", event.key, "ctrl:", event.ctrlKey, "meta:", event.metaKey);
+
+  const isSaveShortcut =
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === "s";
+
+  if (isSaveShortcut) {
+    console.log("Save shortcut detected");
+    event.preventDefault();
+
+    if (typeof window.saveCurrentFile === "function") {
+      console.log("Calling saveCurrentFile()");
+      window.saveCurrentFile();
+    } else {
+      console.error("saveCurrentFile is not available.");
+    }
+  }
+});*/
+
 // Show a brief slide-in notification in the top-right corner
 function showNotification(message, type) {
   // type is "success", "error", or "warning" — maps to Semantic UI message colors
@@ -180,7 +201,7 @@ function renderFileExplorer(entries, currentPath) {
       if (entry.type === "directory") {
         const nextPath =
           entry.name === ".."
-            ? currentPath + "/.."
+            ? `${currentPath}/..`
             : `${currentPath}/${entry.name}`;
         loadFileExplorer(nextPath);
       } else {
@@ -194,7 +215,10 @@ function renderFileExplorer(entries, currentPath) {
 }
 
 // Open a file from the server and load it into Monaco
+// Open a file from the server and load its contents into the Monaco editor
 async function openServerFile(filePath, fileName) {
+  console.log("Opening file:", filePath);
+
   if (!window.sshToken) {
     console.error("No SSH token found.");
     return;
@@ -211,24 +235,29 @@ async function openServerFile(filePath, fileName) {
     });
 
     const result = await response.json();
+    console.log("ssh-read result:", result);
 
     if (!result.success) {
       console.error("Failed to read file:", result.error);
       return;
     }
 
+    // Make sure the Monaco editor exists
     if (!window.sourceEditor) {
       console.error("Editor not initialized.");
       return;
     }
 
+    // Load file contents into the editor
     window.sourceEditor.setValue(result.content);
 
-    // Optional: track current open file for saving later
+    // Remember which file is currently open
     window.currentOpenFilePath = result.path;
     window.currentOpenFileName = fileName;
 
-    // Optional: update tab title if you already have a tab label element
+    console.log("Current open file:", window.currentOpenFilePath);
+
+    // Update visible editor tab title if available
     const tabLabel = document.querySelector(".lm_title");
     if (tabLabel) {
       tabLabel.textContent = fileName;
@@ -287,3 +316,60 @@ document.addEventListener("DOMContentLoaded", function () {
   window.addEventListener("pagehide", beaconSignOut);
   window.addEventListener("beforeunload", beaconSignOut);
 });
+
+// Attach saveCurrentFile to the Save button in the UI
+document.getElementById("save-file-btn")?.addEventListener("click", () => {
+  if (typeof window.saveCurrentFile === "function") {
+    window.saveCurrentFile();
+  } else {
+    console.error("saveCurrentFile is not available.");
+  }
+});
+
+// Save the currently open file back to the server.
+// Uses the active SSH session token and the file path stored
+// when the user opened a file from the Explorer.
+async function saveCurrentFile() {
+  if (!window.sshToken) {
+    console.error("No SSH token found.");
+    return;
+  }
+
+  if (!window.currentOpenFilePath) {
+    console.error("No file is currently open.");
+    return;
+  }
+
+  if (!window.sourceEditor) {
+    console.error("Editor not initialized.");
+    return;
+  }
+
+  const content = window.sourceEditor.getValue();
+
+  try {
+    const response = await fetch("/ssh-write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: window.sshToken,
+        path: window.currentOpenFilePath,
+        content
+      })
+    });
+
+    const result = await response.json();
+    console.log("Save result:", result);
+
+    if (!result.success) {
+      console.error("Failed to save file:", result.error);
+      return;
+    }
+
+    console.log(`Saved file: ${window.currentOpenFilePath}`);
+  } catch (err) {
+    console.error("Error saving file:", err);
+  }
+}
+
+window.saveCurrentFile = saveCurrentFile;

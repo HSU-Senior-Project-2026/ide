@@ -848,6 +848,39 @@ document.addEventListener("DOMContentLoaded", async function () {
                 snippetSuggestions: "none"
             });
 
+            // Expose the Monaco editor globally so other scripts
+            // can open and save files through it
+            window.sourceEditor = editor;
+
+            // Handle Ctrl+S / Cmd+S directly inside Monaco
+            /*editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
+                console.log("Monaco save shortcut triggered");
+
+                if (typeof window.saveCurrentFile === "function") {
+                    window.saveCurrentFile();
+                } else {
+                    console.error("saveCurrentFile is not available.");
+                }
+            });*/
+
+            editor.addAction({
+                id: "save-file-action",
+                label: "Save File",
+                keybindings: [
+                    monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS
+                ],
+                run: function () {
+                    console.log("Monaco save action triggered");
+
+                    if (typeof window.saveCurrentFile === "function") {
+                        console.log("Calling window.saveCurrentFile from Monaco action");
+                        return window.saveCurrentFile();
+                    } else {
+                        console.error("window.saveCurrentFile is not available");
+                    }
+                }
+            });
+
             // Set initial content if parsed dynamically via file_explorer open callbacks
             if (state.initialContent !== undefined) {
                 editor.setValue(state.initialContent);
