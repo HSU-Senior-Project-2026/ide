@@ -392,8 +392,7 @@ document.getElementById("sidebar-new-file")?.addEventListener("click", async () 
         return;
     }
 
-    const fileName = prompt("Enter new file name:");
-    if (!fileName) return;
+    showInlineNewItemInput("file");
 
     // Create the file in the current directory if you are tracking one,
     // otherwise default to the home directory.
@@ -429,3 +428,115 @@ document.getElementById("sidebar-new-file")?.addEventListener("click", async () 
         console.error("Error creating file:", err);
     }
 });
+
+function showInlineNewItemInput(type) {
+    const container = document.getElementById("file-explorer-list");
+    if (!container) {
+        console.error("Explorer container not found.");
+        return;
+    }
+
+    // Prevent multiple inputs
+    if (document.getElementById("inline-new-item")) return;
+
+    const row = document.createElement("div");
+    row.id = "inline-new-item";
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.padding = "4px";
+
+    const icon = document.createElement("span");
+    icon.textContent = type === "folder" ? "📁 " : "📄 ";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = type === "folder" ? "New folder" : "New file";
+    input.style.flex = "1";
+    input.style.background = "transparent";
+    input.style.color = "white";
+    input.style.border = "1px solid #555";
+    input.style.outline = "none";
+
+    row.appendChild(icon);
+    row.appendChild(input);
+
+    container.prepend(row);
+
+    input.focus();
+
+    async function submit() {
+        const name = input.value.trim();
+        if (!name) {
+            row.remove();
+            return;
+        }
+
+        const basePath = window.currentExplorerPath || "~";
+        const fullPath = `${basePath}/${name}`;
+
+        try {
+            let response, result;
+
+            if (type === "file") {
+                response = await fetch("/ssh-write", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        token: window.sshToken,
+                        path: fullPath,
+                        content: ""
+                    })
+                });
+
+                result = await response.json();
+
+                if (!result.success) {
+                    console.error("Create file failed:", result.error);
+                    return;
+                }
+
+                await loadFileExplorer(basePath);
+                openServerFile(result.path, name);
+
+            } else {
+                response = await fetch("/ssh-mkdir", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        token: window.sshToken,
+                        path: fullPath
+                    })
+                });
+
+                result = await response.json();
+
+                if (!result.success) {
+                    console.error("Create folder failed:", result.error);
+                    return;
+                }
+
+                await loadFileExplorer(basePath);
+            }
+
+        } catch (err) {
+            console.error("Error creating item:", err);
+        } finally {
+            row.remove();
+        }
+    }
+
+    function cancel() {
+        row.remove();
+    }
+
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submit();
+        if (e.key === "Escape") cancel();
+    });
+
+    input.addEventListener("blur", () => {
+        setTimeout(() => {
+            if (document.body.contains(row)) cancel();
+        }, 100);
+    });
+}
