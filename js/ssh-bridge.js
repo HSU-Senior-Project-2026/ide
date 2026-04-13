@@ -568,6 +568,47 @@ app.post("/ssh-ls", async (req, res) => {
   }
 });
 
+// Create a new directory in the signed-in user's current workspace
+app.post("/ssh-mkdir", async (req, res) => {
+  const { token, path: dirPath } = req.body;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Missing session token"
+    });
+  }
+
+  if (!dirPath) {
+    return res.status(400).json({
+      success: false,
+      error: "Directory path is required"
+    });
+  }
+
+  try {
+    const resolvedPath = await validatePathForToken(token, dirPath);
+
+    await sshExecForToken(
+      token,
+      `mkdir ${JSON.stringify(resolvedPath)}`
+    );
+
+    return res.json({
+      success: true,
+      path: resolvedPath,
+      message: "Folder created successfully"
+    });
+  } catch (err) {
+    console.error("[SSH-MKDIR ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    return res.status(status).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
 // Maps Judge0 language IDs to the filenames and shell commands needed on the
 // CSCI server. compile: null means the language is interpreted — no compile
 // step needed, we just write the file and mark it ready to run immediately.

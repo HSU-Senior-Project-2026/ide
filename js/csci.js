@@ -429,6 +429,15 @@ document.getElementById("sidebar-new-file")?.addEventListener("click", async () 
     }
 });
 
+document.getElementById("sidebar-new-folder")?.addEventListener("click", () => {
+    if (!window.sshToken) {
+        console.error("No SSH token found.");
+        return;
+    }
+
+    showInlineNewItemInput("folder");
+});
+
 function showInlineNewItemInput(type) {
     const container = document.getElementById("file-explorer-list");
     if (!container) {
