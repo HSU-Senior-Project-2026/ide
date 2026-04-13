@@ -21,10 +21,10 @@ var fontSize = 13;
 export var layout;
 
 // variables to track the current file name and unsaved changes
-var currentFileName = "Main.java";
-var hasUnsavedChanges = false;
-var isSaving = false;
-var suppressDirty = true;   // true while we are loading/setting content
+window.currentFileName = "Main.java";
+window.hasUnsavedChanges = false;
+window.isSaving = false;
+window.suppressDirty = true;   // true while we are loading/setting content
 
 // For autosave functionality
 var autosaveTimer = null;
@@ -507,16 +507,18 @@ function openShell() {
 function updateSourceTabTitle() {
   if (!sourceContainer) return; // source tab not ready yet
 
-  var dot = hasUnsavedChanges ? " •" : "";
-  var saving = isSaving ? " — Saving..." : "";
-  sourceContainer.setTitle(currentFileName + dot + saving);
+  var dot = window.hasUnsavedChanges ? " •" : "";
+  var saving = window.isSaving ? " — Saving..." : "";
+  sourceContainer.setTitle(window.currentFileName + dot + saving);
 }
+
+window.updateSourceTabTitle = updateSourceTabTitle;
 
 
 function setSourceCodeName(name) {
-  currentFileName = name;
+  window.currentFileName = name;
   selectLanguageForExtension(name.split(".").pop());
-  updateSourceTabTitle();
+  window.updateSourceTabTitle();
 }
 
 /*function setSourceCodeName(name) {
@@ -529,49 +531,50 @@ function setSourceCodeName(name) {
 
 function newFile(filename) {
     clear();
-    suppressDirty = true;
+    window.suppressDirty = true;
     sourceEditor.setValue("");
     suppressDirty = false;
 
     selectLanguageForExtension(filename.split(".").pop());
     setSourceCodeName(filename);
 
-    hasUnsavedChanges = false;
-    updateSourceTabTitle();
+    window.hasUnsavedChanges = false;
+    window.updateSourceTabTitle();
 
     // Clear saved source so refresh starts fresh with the new file
     try { localStorage.removeItem("judge0.sourceCode"); } catch (e) {}
 }
 
 function openFile(content, filename) {
-    suppressDirty = true;                 // prevent dirty flag during load
+    window.suppressDirty = true;                 // prevent dirty flag during load
     clear();
 
     sourceEditor.setValue(content);
-    suppressDirty = false;                // now allow user edits to mark dirty
+    window.suppressDirty = false;                // now allow user edits to mark dirty
 
     selectLanguageForExtension(filename.split(".").pop());
     setSourceCodeName(filename);
 
-    hasUnsavedChanges = false;            // freshly loaded file = clean
-    updateSourceTabTitle();               // ensure correct title
+    window.hasUnsavedChanges = false;            // freshly loaded file = clean
+    window.updateSourceTabTitle();               // ensure correct title
 }
+window.openFile = openFile; // Expose globally for file explorer callbacks  
 
 function saveNow(reason) {
   if (!sourceEditor) return;
 
-  isSaving = true;
-  updateSourceTabTitle();
+  window.isSaving = true;
+  window.updateSourceTabTitle();
 
   var content = sourceEditor.getValue();
 
   // MVP: save to localStorage (silent autosave)
-  localStorage.setItem("autosave:" + currentFileName, content);
+  localStorage.setItem("autosave:" + window.currentFileName, content);
   FileManager.saveActiveFile(content);
 
-  isSaving = false;
-  hasUnsavedChanges = false;
-  updateSourceTabTitle();
+  window.isSaving = false;
+  window.hasUnsavedChanges = false;
+  window.updateSourceTabTitle();
 }
 
 // Schedules an automatic save after the user stops typing
@@ -580,7 +583,7 @@ function scheduleAutosave() {
 
   autosaveTimer = setTimeout(function () {
     // Only save if there are unsaved changes
-    if (!hasUnsavedChanges) return;
+    if (!window.hasUnsavedChanges) return;
     saveNow("idle");
   }, AUTOSAVE_MS);
 }
@@ -601,7 +604,7 @@ async function openAction() {
 }
 
 async function saveAction() {
-    saveFile(sourceEditor.getValue(), currentFileName);
+    saveFile(sourceEditor.getValue(), window.currentFileName);
 }
 
 function setFontSizeForAllEditors(fontSize) {
@@ -863,7 +866,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 }
             });*/
 
-            editor.addAction({
+            /*editor.addAction({
                 id: "save-file-action",
                 label: "Save File",
                 keybindings: [
@@ -879,7 +882,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                         console.error("window.saveCurrentFile is not available");
                     }
                 }
-            });
+            });*/
 
             // Set initial content if parsed dynamically via file_explorer open callbacks
             if (state.initialContent !== undefined) {
@@ -955,23 +958,18 @@ document.addEventListener("DOMContentLoaded", async function () {
 
             // When the user types in the source editor, mark file as modified
             editor.onDidChangeModelContent(function () {
-                if (suppressDirty) return;   // ignore changes caused by setValue/openFile/init
-                hasUnsavedChanges = true;
-                updateSourceTabTitle();
-                scheduleAutosave();         // schedule an autosave after user stops typing for a bit
-
-                // Persist source code to localStorage
-                try { localStorage.setItem("judge0.sourceCode", editor.getValue()); } catch (e) {}
-                if (fileId !== "default") {
-                    try { FileManager.saveActiveFile(editor.getValue()); } catch (e) {}
-                }
+                if (window.suppressDirty) return;   // ignore changes caused by setValue/openFile/init
+                
+                window.hasUnsavedChanges = true;
+                window.updateSourceTabTitle();
+                //scheduleAutosave();         // schedule an autosave after user stops typing for a bit
             });
 
              // After initial editor setup/content load finishes, mark file as clean and enable dirty tracking
             setTimeout(function () {
-                hasUnsavedChanges = false;
-                suppressDirty = false;
-                updateSourceTabTitle();
+                window.hasUnsavedChanges = false;
+                window.suppressDirty = false;
+                window.updateSourceTabTitle();
             }, 0);
 
             editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {

@@ -249,7 +249,7 @@ async function openServerFile(filePath, fileName) {
     }
 
     // Load file contents into the editor
-    window.sourceEditor.setValue(result.content);
+    window.openFile(result.content, fileName);
 
     // Remember which file is currently open
     window.currentOpenFilePath = result.path;
@@ -257,11 +257,6 @@ async function openServerFile(filePath, fileName) {
 
     console.log("Current open file:", window.currentOpenFilePath);
 
-    // Update visible editor tab title if available
-    const tabLabel = document.querySelector(".lm_title");
-    if (tabLabel) {
-      tabLabel.textContent = fileName;
-    }
   } catch (err) {
     console.error("Error opening file:", err);
   }
@@ -345,6 +340,16 @@ async function saveCurrentFile() {
     return;
   }
 
+  /*if (autosaveTimer) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+  }*/
+
+  if (window.isSaving) return;
+
+  window.isSaving = true;
+  window.updateSourceTabTitle();
+
   const content = window.sourceEditor.getValue();
 
   try {
@@ -366,9 +371,16 @@ async function saveCurrentFile() {
       return;
     }
 
+    window.isSaving = false;
+    window.hasUnsavedChanges = false;
+    window.updateSourceTabTitle();
+
     console.log(`Saved file: ${window.currentOpenFilePath}`);
   } catch (err) {
     console.error("Error saving file:", err);
+  } finally {
+    window.isSaving = false;
+    window.updateSourceTabTitle();
   }
 }
 
