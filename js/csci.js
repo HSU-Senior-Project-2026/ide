@@ -143,7 +143,7 @@ async function signOut() {
 // Load files from the user's home directory and render them in the Explorer
 async function loadFileExplorer(path = "~") {
   console.log("loadFileExplorer called with path:", path);
-
+  window.currentExplorerPath = path;  // Track current path for navigation and new file creation
   if (!window.sshToken) {
     console.error("No SSH token found.");
     return;
@@ -385,3 +385,47 @@ async function saveCurrentFile() {
 }
 
 window.saveCurrentFile = saveCurrentFile;
+
+document.getElementById("sidebar-new-file")?.addEventListener("click", async () => {
+    if (!window.sshToken) {
+        console.error("No SSH token found.");
+        return;
+    }
+
+    const fileName = prompt("Enter new file name:");
+    if (!fileName) return;
+
+    // Create the file in the current directory if you are tracking one,
+    // otherwise default to the home directory.
+    const filePath = window.currentExplorerPath
+        ? `${window.currentExplorerPath}/${fileName}`
+        : `~/${fileName}`;
+
+    try {
+        const response = await fetch("/ssh-write", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                token: window.sshToken,
+                path: filePath,
+                content: ""
+            })
+        });
+
+        const result = await response.json();
+        console.log("Create file result:", result);
+
+        if (!result.success) {
+            console.error("Failed to create file:", result.error);
+            return;
+        }
+
+        // Refresh the sidebar
+        loadFileExplorer(window.currentExplorerPath || "~");
+
+        // Optionally open the new empty file immediately
+        openServerFile(result.path, fileName);
+    } catch (err) {
+        console.error("Error creating file:", err);
+    }
+});
