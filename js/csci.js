@@ -68,6 +68,9 @@ async function signIn(e) {
       document.getElementById("judge0-account-label").textContent = displayName;
       document.getElementById("judge0-csci-sign-in-btn").style.display = "none";
       document.getElementById("judge0-csci-sign-out-btn").style.display = "";
+
+      // Tell ide.js to auto-open the persistent shell.
+      window.dispatchEvent(new Event("csci-signed-in"));
     } else {
       showNotification("Login failed: " + result.error, "error");
     }
@@ -98,6 +101,9 @@ async function signOut() {
 
     const result = await response.json();
     console.log("Server response:", result);
+
+    // Tell ide.js to tear down the persistent shell before clearing the token.
+    window.dispatchEvent(new Event("csci-signed-out"));
 
     // Clear the token from memory — any subsequent run attempts will be rejected
     window.csciSessionToken = null;
