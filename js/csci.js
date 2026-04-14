@@ -89,10 +89,14 @@ async function signIn(e) {
       document.getElementById("judge0-csci-sign-out-btn").style.display = "";
 
       // Save the SSH session token returned by the backend.
-      // This token is required for future authenticated actions
-      // like reading, writing, compiling, and running code.
+      // window.csciSessionToken is used by ide.js (run, compile, shell).
+      // window.sshToken is used by file explorer operations (ssh-ls, ssh-read, etc).
+      // Both must point to the same token.
+      window.csciSessionToken = result.token;
       window.sshToken = result.token;
-      console.log("SSH token saved:", window.sshToken);
+
+      // Tell ide.js to auto-open the persistent shell.
+      window.dispatchEvent(new Event("csci-signed-in"));
 
       loadFileExplorer("~");
 
@@ -115,7 +119,7 @@ async function signOut() {
     const response = await fetch("/ssh-sign-out", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "exit" })
+      body: JSON.stringify({ token: window.csciSessionToken })
     });
 
     if (!response.ok) {
@@ -128,8 +132,9 @@ async function signOut() {
     // Tell ide.js to tear down the persistent shell before clearing the token.
     window.dispatchEvent(new Event("csci-signed-out"));
 
-    // Clear the token from memory — any subsequent run attempts will be rejected
+    // Clear both token references — any subsequent run/file attempts will be rejected
     window.csciSessionToken = null;
+    window.sshToken = null;
     showNotification("Disconnected from CSCI server.", "warning");
 
   } catch (err) {
