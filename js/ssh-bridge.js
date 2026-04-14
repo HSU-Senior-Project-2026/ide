@@ -81,6 +81,82 @@ function invalidateSession(token, reason) {
   sessions.delete(token);
 }
 
+// Get the active session for a token sent by the frontend.
+// Returns null if the token is missing, invalid, or the SSH client is no longer ready.
+function getSessionFromToken(token) {
+  if (!token || !sessions.has(token)) return null;
+
+  const session = sessions.get(token);
+  if (!session || !session.ready || !session.sshClient) return null;
+
+  return session;
+}
+
+// Resolve a requested path and ensure it stays inside the signed-in user's home directory.
+async function validatePathForToken(token, inputPath) {
+  const session = getSessionFromToken(token);
+
+  if (!session) {
+    throw new Error("Invalid or expired session");
+  }
+
+  if (!session.homeDir) {
+    throw new Error("Home directory not resolved");
+  }
+
+  let resolved = inputPath.replace(/^~/, session.homeDir);
+
+  try {
+    resolved = (await sshExecForToken(
+      token,
+      `realpath -m ${JSON.stringify(resolved)}`
+    )).trim();
+  } catch {
+    resolved = path.posix.normalize(resolved);
+  }
+
+  if (resolved !== session.homeDir && !resolved.startsWith(session.homeDir + "/")) {
+    throw new Error("Access denied: path is outside your home directory");
+  }
+
+  return resolved;
+}
+
+// Run a command over the existing SSH connection for a signed-in user.
+function sshExecForToken(token, command) {
+  return new Promise((resolve, reject) => {
+    const session = getSessionFromToken(token);
+
+    if (!session) {
+      return reject(new Error("Invalid or expired session"));
+    }
+
+    touchSession(token);
+
+    session.sshClient.exec(command, (err, stream) => {
+      if (err) return reject(err);
+
+      let stdout = "";
+      let stderr = "";
+
+      stream.on("data", (data) => {
+        stdout += data.toString();
+      });
+
+      stream.stderr.on("data", (data) => {
+        stderr += data.toString();
+      });
+
+      stream.on("close", (code) => {
+        if (code !== 0) {
+          return reject(new Error(stderr.trim() || `Exit code ${code}`));
+        }
+        resolve(stdout);
+      });
+    });
+  });
+}
+
 // SSH endpoint for sign-in
 // Opens a live SSH connection to validate credentials and KEEPS IT OPEN for
 // the lifetime of the session. The browser gets back a token that it presents
@@ -100,13 +176,45 @@ app.post("/ssh-sign-in", (req, res) => {
   const conn = new Client();
   let responded = false;
 
-  conn.on("ready", () => {
+  /*conn.on("ready", () => {
     console.log(`[SSH LOGIN SUCCESS] username: ${username}`);
 
     // Generate a cryptographically random token — 32 random bytes turned into
     // a 64-character hex string. This is unique enough that two students will
     // never receive the same token.
     const token = crypto.randomBytes(32).toString("hex");
+
+    conn.exec("echo $HOME", (err, stream) => {
+      if (err) {
+        console.error("[SSH HOME ERROR]", err.message);
+        return;
+      } else {
+        let stdout = "";
+        let stderr = "";
+
+        stream.on("data", (data) => {
+          stdout += data.toString();
+        });
+
+        stream.stderr.on("data", (data) => {
+          stderr += data.toString();
+        });
+
+        stream.on("close", (code) => {
+          if (code === 0) {
+            const session = sessions.get(token);
+            if (session) {
+              session.homeDir = stdout.trim();
+              console.log(`[SSH HOME] user=${username} home=${session.homeDir}`);
+            }
+          } else {
+            console.error("[SSH HOME ERROR]", stderr.trim() || `Exit code ${code}`);
+          }
+        });
+      }
+    });
+
+    const homeDir = stdout.trim();
 
     // Store the LIVE client in the session — do not call conn.end() here.
     // This connection will be reused by every compile/run/shell/file-op until
@@ -116,12 +224,14 @@ app.post("/ssh-sign-in", (req, res) => {
       password,
       sshClient: conn,
       ready: true,
+      homeDir,
       tmpDir: null,
       langId: null,
       lastActivity: Date.now(),
       inactivityTimer: null,
     });
     console.log(`[SESSION CREATED] token: ${token.substring(0, 8)}... for ${username}`);
+    console.log(`[SSH HOME] user=${username} home=${homeDir}`);
 
     // Arm the idle-reap timer. Every WS handler entry touches the session,
     // which resets this — so an active user never gets reaped mid-lesson.
@@ -144,7 +254,91 @@ app.post("/ssh-sign-in", (req, res) => {
       responded = true;
       res.json({ success: true, token, message: "Signed in successfully" });
     }
+  }); */
+
+  conn.on("ready", () => {
+    console.log(`[SSH LOGIN SUCCESS] username: ${username}`);
+
+    const token = crypto.randomBytes(32).toString("hex");
+
+    conn.exec("echo $HOME", (err, stream) => {
+      if (err) {
+        console.error("[SSH HOME ERROR]", err.message);
+        if (!responded) {
+          responded = true;
+          return res.status(500).json({
+            success: false,
+            error: "Could not resolve home directory"
+          });
+        }
+        return;
+      }
+
+      let stdout = "";
+      let stderr = "";
+
+      stream.on("data", (data) => {
+        stdout += data.toString();
+      });
+
+      stream.stderr.on("data", (data) => {
+        stderr += data.toString();
+      });
+
+      stream.on("close", (code) => {
+        if (code !== 0) {
+          console.error("[SSH HOME ERROR]", stderr.trim() || `Exit code ${code}`);
+          if (!responded) {
+            responded = true;
+            return res.status(500).json({
+              success: false,
+              error: "Could not resolve home directory"
+            });
+          }
+          return;
+        }
+
+        const homeDir = stdout.trim();
+
+        sessions.set(token, {
+          username,
+          password,
+          sshClient: conn,
+          ready: true,
+          homeDir,
+          tmpDir: null,
+          langId: null,
+          lastActivity: Date.now(),
+          inactivityTimer: null,
+        });
+
+        console.log(`[SSH HOME] user=${username} home=${homeDir}`);
+        console.log(`[SESSION CREATED] token=${token.substring(0, 8)}...`);
+
+        touchSession(token);
+
+        conn.on("close", () => {
+          invalidateSession(token, "client-closed");
+        });
+
+        conn.on("end", () => {
+          invalidateSession(token, "client-ended");
+        });
+
+        // SEND RESPONSE HERE (after homeDir is ready)
+        if (!responded) {
+          responded = true;
+          res.json({
+            success: true,
+            token,
+            message: "Signed in successfully"
+          });
+        }
+      });
+    });
   });
+
+
 
   conn.on("error", (err) => {
     console.log(`[SSH ERROR] ${err.message}`);
@@ -195,6 +389,315 @@ app.post("/ssh-sign-out", (req, res) => {
     return res.json({ success: true, message: "Signed out successfully" });
   } else {
     return res.status(400).json({ success: false, message: "No active session found" });
+  }
+});
+
+// Read a file from the signed-in user's home directory.
+app.post("/ssh-read", async (req, res) => {
+  const { token, path: filePath } = req.body;
+
+  if (!token) {
+    return res.status(401).json({ success: false, error: "Missing session token" });
+  }
+
+  if (!filePath) {
+    return res.status(400).json({ success: false, error: "File path is required" });
+  }
+
+  try {
+    const resolvedPath = await validatePathForToken(token, filePath);
+    const content = await sshExecForToken(token, `cat ${JSON.stringify(resolvedPath)}`);
+
+    res.json({
+      success: true,
+      path: resolvedPath,
+      content
+    });
+  } catch (err) {
+    console.error("[SSH-READ ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    res.status(status).json({ success: false, error: err.message });
+  }
+});
+
+// Write content to a file in the signed-in user's home directory.
+app.post("/ssh-write", async (req, res) => {
+  const { token, path: filePath, content } = req.body;
+
+  if (!token) {
+    return res.status(401).json({ success: false, error: "Missing session token" });
+  }
+
+  if (!filePath) {
+    return res.status(400).json({ success: false, error: "File path is required" });
+  }
+
+  try {
+    const resolvedPath = await validatePathForToken(token, filePath);
+    const encoded = Buffer.from(content || "").toString("base64");
+
+    await sshExecForToken(
+      token,
+      `echo ${JSON.stringify(encoded)} | base64 -d > ${JSON.stringify(resolvedPath)}`
+    );
+
+    res.json({
+      success: true,
+      path: resolvedPath,
+      message: "File saved successfully"
+    });
+  } catch (err) {
+    console.error("[SSH-WRITE ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    res.status(status).json({ success: false, error: err.message });
+  }
+});
+
+// List files and folders in the signed-in user's home directory.
+// Uses the existing token-based SSH session and prevents access
+// outside the user's home directory.
+app.post("/ssh-ls", async (req, res) => {
+  const { token, path: dirPath } = req.body;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Missing session token"
+    });
+  }
+
+  // Default to the user's home directory if no path is provided
+  const requestedPath = dirPath || "~";
+
+  try {
+    const session = getSessionFromToken(token);
+
+    if (!session) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid or expired session"
+      });
+    }
+
+    const resolvedDir = await validatePathForToken(token, requestedPath);
+    const isHome = resolvedDir === session.homeDir;
+
+    // ls -laF gives:
+    // - hidden files
+    // - file/folder indicators
+    // - permissions
+    const output = await sshExecForToken(
+      token,
+      `ls -F ${JSON.stringify(resolvedDir)}`
+    );
+
+    const lines = output.split("\n").filter(Boolean);
+    const entries = [];
+
+    /*for (const line of lines) {
+      // Skip "total N"
+      if (line.startsWith("total ")) continue;
+
+      const parts = line.split(/\s+/);
+      if (parts.length < 9) continue;
+
+      const permStr = parts[0];
+      const rawName = parts.slice(8).join(" ");
+
+      // Skip current directory entry
+      if (rawName === "./" || rawName === ".") continue;
+
+      // Allow going up one level only if not already at home
+      if (rawName === "../" || rawName === "..") {
+        if (!isHome) {
+          entries.unshift({
+            name: "..",
+            type: "directory",
+            readable: true,
+            writable: false
+          });
+        }
+        continue;
+      }
+
+      const isDir = rawName.endsWith("/");
+      const name = rawName.replace(/[/*@=|]$/, "");
+
+      entries.push({
+        name,
+        type: isDir ? "directory" : "file",
+        readable: permStr.charAt(1) === "r",
+        writable: permStr.charAt(2) === "w"
+      });
+    }*/
+
+    if (!isHome) {
+      entries.push({
+        name: "..",
+        type: "directory",
+        readable: true,
+        writable: true
+      });
+    }
+
+    for (const line of lines) {
+      const isDir = line.endsWith("/");
+      const name = line.replace(/[/*@=|]$/, "");
+
+      entries.push({
+        name,
+        type: isDir ? "directory" : "file",
+        readable: true,
+        writable: true
+      });
+    }
+
+    return res.json({
+      success: true,
+      path: resolvedDir,
+      isHome,
+      entries
+    });
+  } catch (err) {
+    console.error("[SSH-LS ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    return res.status(status).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// Create a new directory in the signed-in user's current workspace
+app.post("/ssh-mkdir", async (req, res) => {
+  const { token, path: dirPath } = req.body;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Missing session token"
+    });
+  }
+
+  if (!dirPath) {
+    return res.status(400).json({
+      success: false,
+      error: "Directory path is required"
+    });
+  }
+
+  try {
+    const resolvedPath = await validatePathForToken(token, dirPath);
+
+    await sshExecForToken(
+      token,
+      `mkdir ${JSON.stringify(resolvedPath)}`
+    );
+
+    return res.json({
+      success: true,
+      path: resolvedPath,
+      message: "Folder created successfully"
+    });
+  } catch (err) {
+    console.error("[SSH-MKDIR ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    return res.status(status).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// Rename or move a file/folder in the signed-in user's workspace
+app.post("/ssh-mv", async (req, res) => {
+  const { token, from, to } = req.body;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Missing session token"
+    });
+  }
+
+  if (!from || !to) {
+    return res.status(400).json({
+      success: false,
+      error: "Both 'from' and 'to' paths are required"
+    });
+  }
+
+  try {
+    const resolvedFrom = await validatePathForToken(token, from);
+    const resolvedTo = await validatePathForToken(token, to);
+
+    await sshExecForToken(
+      token,
+      `mv ${JSON.stringify(resolvedFrom)} ${JSON.stringify(resolvedTo)}`
+    );
+
+    return res.json({
+      success: true,
+      from: resolvedFrom,
+      to: resolvedTo,
+      message: "Rename successful"
+    });
+  } catch (err) {
+    console.error("[SSH-MV ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    return res.status(status).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// Delete a file or an empty directory in the signed-in user's workspace
+app.post("/ssh-rm", async (req, res) => {
+  const { token, path: targetPath } = req.body;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Missing session token"
+    });
+  }
+
+  if (!targetPath) {
+    return res.status(400).json({
+      success: false,
+      error: "Path is required"
+    });
+  }
+
+  try {
+    const resolvedPath = await validatePathForToken(token, targetPath);
+
+    // Check whether target is a directory
+    const fileType = (await sshExecForToken(
+      token,
+      `stat -c %F ${JSON.stringify(resolvedPath)}`
+    )).trim();
+
+    if (fileType === "directory") {
+      // Only removes empty directories
+      await sshExecForToken(token, `rmdir ${JSON.stringify(resolvedPath)}`);
+    } else {
+      await sshExecForToken(token, `rm ${JSON.stringify(resolvedPath)}`);
+    }
+
+    return res.json({
+      success: true,
+      path: resolvedPath,
+      message: "Delete successful"
+    });
+  } catch (err) {
+    console.error("[SSH-RM ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    return res.status(status).json({
+      success: false,
+      error: err.message
+    });
   }
 });
 

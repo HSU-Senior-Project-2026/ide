@@ -1,6 +1,27 @@
 
 //--------------------------------------------------
 
+/*// Allow Ctrl+S / Cmd+S to save the currently open file.
+document.addEventListener("keydown", (event) => {
+  console.log("keydown detected:", event.key, "ctrl:", event.ctrlKey, "meta:", event.metaKey);
+
+  const isSaveShortcut =
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === "s";
+
+  if (isSaveShortcut) {
+    console.log("Save shortcut detected");
+    event.preventDefault();
+
+    if (typeof window.saveCurrentFile === "function") {
+      console.log("Calling saveCurrentFile()");
+      window.saveCurrentFile();
+    } else {
+      console.error("saveCurrentFile is not available.");
+    }
+  }
+});*/
+
 // Show a brief slide-in notification in the top-right corner
 function showNotification(message, type) {
   // type is "success", "error", or "warning" — maps to Semantic UI message colors
@@ -57,10 +78,8 @@ async function signIn(e) {
     const result = await response.json();
 
     if (result.success) {
-      // Store the session token so run() can include it in WebSocket connections.
-      // window is the browser's global object — anything on it is accessible from
-      // any script on the page, including ide.js.
-      window.csciSessionToken = result.token;
+      // Clear credentials from DOM immediately after successful login
+      passwordInput.value = "";
       $('#judge0-csci-sign-in-modal').modal('hide');
       showNotification(`Connected to CSCI server as ${username}`, "success");
       // Update account dropdown to show signed-in state
@@ -69,8 +88,14 @@ async function signIn(e) {
       document.getElementById("judge0-csci-sign-in-btn").style.display = "none";
       document.getElementById("judge0-csci-sign-out-btn").style.display = "";
 
-      // Tell ide.js to auto-open the persistent shell.
-      window.dispatchEvent(new Event("csci-signed-in"));
+      // Save the SSH session token returned by the backend.
+      // This token is required for future authenticated actions
+      // like reading, writing, compiling, and running code.
+      window.sshToken = result.token;
+      console.log("SSH token saved:", window.sshToken);
+
+      loadFileExplorer("~");
+
     } else {
       showNotification("Login failed: " + result.error, "error");
     }
@@ -90,9 +115,7 @@ async function signOut() {
     const response = await fetch("/ssh-sign-out", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Send the stored token so ssh-bridge knows which session to remove.
-      // Previously this sent { action: "exit" } which the updated server doesn't recognize.
-      body: JSON.stringify({ token: window.csciSessionToken })
+      body: JSON.stringify({ action: "exit" })
     });
 
     if (!response.ok) {
@@ -122,39 +145,282 @@ async function signOut() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", function () {
-  document.getElementById("judge0-csci-sign-in-btn").addEventListener("click", showSignInModal);
+// Load files from the user's home directory and render them in the Explorer
+async function loadFileExplorer(path = "~") {
+  console.log("loadFileExplorer called with path:", path);
+  window.currentExplorerPath = path;  // Track current path for navigation and new file creation
+  if (!window.sshToken) {
+    console.error("No SSH token found.");
+    return;
+  }
 
-  // Prevent native form submission to keep credentials out of the URL
-  document.getElementById("judge0-csci-sign-in-form").addEventListener("submit", function (e) {
+  try {
+    console.log("Sending /ssh-ls request...");
+
+    const response = await fetch("/ssh-ls", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: window.sshToken,
+        path
+      })
+    });
+
+    console.log("Received response from /ssh-ls:", response.status);
+
+    const result = await response.json();
+    console.log("ssh-ls result:", result);
+
+    if (!result.success) {
+      console.error("Failed to load files:", result.error);
+      return;
+    }
+
+    renderFileExplorer(result.entries, result.path);
+  } catch (err) {
+    console.error("Error loading file explorer:", err);
+  }
+}
+
+// Render file/folder entries into the Explorer sidebar
+function renderFileExplorer(entries, currentPath) {
+  const container = document.getElementById("file-explorer-list");
+  if (!container) {
+    console.error("Explorer container not found.");
+    return;
+  }
+
+  container.innerHTML = "";
+
+  entries.forEach((entry) => {
+    const item = document.createElement("div");
+    item.className = "file-item";
+    item.style.display = "flex";
+    item.style.justifyContent = "space-between";
+    item.style.alignItems = "center";
+
+    const label = document.createElement("span");
+    label.textContent = entry.type === "directory" ? `📁 ${entry.name}` : `📄 ${entry.name}`;
+    label.style.flex = "1";
+
+    label.addEventListener("click", () => {
+      if (entry.type === "directory") {
+        const nextPath =
+          entry.name === ".."
+            ? `${currentPath}/..`
+            : `${currentPath}/${entry.name}`;
+        loadFileExplorer(nextPath);
+      } else {
+        const filePath = `${currentPath}/${entry.name}`;
+        openServerFile(filePath, entry.name);
+      }
+    });
+
+    const actions = document.createElement("div");
+    actions.className = "file-actions";
+    actions.style.display = "flex";
+    actions.style.gap = "6px";
+    actions.style.marginLeft = "8px";
+
+    const renameBtn = document.createElement("i");
+    renameBtn.className = "edit icon rename-btn";
+    renameBtn.title = "Rename";
+
+    renameBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      showInlineRenameInput(entry, currentPath);
+    });
+
+    const deleteBtn = document.createElement("i");
+    deleteBtn.className = "trash icon delete-btn";
+    deleteBtn.title = "Delete";
+
+    deleteBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteExplorerItem(entry, currentPath);
+    });
+
+    actions.appendChild(renameBtn);
+    actions.appendChild(deleteBtn);
+
+    item.appendChild(label);
+    item.appendChild(actions);
+    container.appendChild(item);
+  });
+}
+// Delete a file or empty folder from the Explorer
+async function deleteExplorerItem(entry, currentPath) {
+    if (!window.sshToken) {
+        console.error("No SSH token found.");
+        return;
+    }
+
+    const targetPath = `${currentPath}/${entry.name}`;
+    const confirmed = confirm(`Delete ${entry.name}?`);
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch("/ssh-rm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                token: window.sshToken,
+                path: targetPath
+            })
+        });
+
+        const result = await response.json();
+        console.log("Delete result:", result);
+
+        if (!result.success) {
+            console.error("Delete failed:", result.error);
+            return;
+        }
+
+        // If the currently open file was deleted, clear editor state
+        if (window.currentOpenFilePath === result.path) {
+            if (window.sourceEditor) {
+                window.suppressDirty = true;
+                window.sourceEditor.setValue("");
+                window.suppressDirty = false;
+            }
+
+            window.currentOpenFilePath = null;
+            window.currentOpenFileName = null;
+            window.currentFileName = "Main.java";
+            window.hasUnsavedChanges = false;
+
+            if (typeof window.updateSourceTabTitle === "function") {
+                window.updateSourceTabTitle();
+            }
+        }
+
+        await loadFileExplorer(currentPath);
+    } catch (err) {
+        console.error("Error deleting item:", err);
+    }
+}
+
+// Open a file from the server and load it into Monaco
+// Open a file from the server and load its contents into the Monaco editor
+async function openServerFile(filePath, fileName) {
+  console.log("Opening file:", filePath);
+
+  if (!window.sshToken) {
+    console.error("No SSH token found.");
+    return;
+  }
+
+  try {
+    const response = await fetch("/ssh-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: window.sshToken,
+        path: filePath
+      })
+    });
+
+    const result = await response.json();
+    console.log("ssh-read result:", result);
+
+    if (!result.success) {
+      console.error("Failed to read file:", result.error);
+      return;
+    }
+
+    // Make sure the Monaco editor exists
+    if (!window.sourceEditor) {
+      console.error("Editor not initialized.");
+      return;
+    }
+
+    // Load file contents into the editor
+    window.openFile(result.content, fileName);
+
+    // Remember which file is currently open
+    window.currentOpenFilePath = result.path;
+    window.currentOpenFileName = fileName;
+
+    console.log("Current open file:", window.currentOpenFilePath);
+
+  } catch (err) {
+    console.error("Error opening file:", err);
+  }
+}
+
+/*document.addEventListener("DOMContentLoaded", function () {
+  document
+    .getElementById("judge0-csci-sign-in-btn")
+    .addEventListener("click", showSignInModal);
+
+  // Pressing Enter in the login form should sign in
+  document
+    .getElementById("judge0-csci-sign-in-form")
+    .addEventListener("submit", function (e) {
+      e.preventDefault(); // prevent page reload / query params
+      signIn(e);
+    });
+
+  document
+    .getElementById("judge0-csci-modal-sign-in-btn")
+    .addEventListener("click", signIn);
+
+  document
+    .getElementById("judge0-csci-modal-sign-in-cancel-btn")
+    .addEventListener("click", hideSignInModal);
+
+  document
+    .getElementById("judge0-csci-sign-out-btn")
+    .addEventListener("click", signOut);
+
+  function beaconSignOut() {
+    if (!window.csciSessionToken) return;
+
+    try {
+      const payload = new Blob(
+        [JSON.stringify({ token: window.csciSessionToken })],
+        { type: "application/json" }
+      );
+      navigator.sendBeacon("/ssh-sign-out", payload);
+    } catch (err) {
+      console.warn("sendBeacon sign-out failed:", err);
+    }
+  }
+
+  window.addEventListener("pagehide", beaconSignOut);
+  window.addEventListener("beforeunload", beaconSignOut);
+});*/
+
+document.addEventListener("DOMContentLoaded", function () {
+  document
+    .getElementById("judge0-csci-sign-in-btn")
+    .addEventListener("click", showSignInModal);
+
+  const signInForm = document.getElementById("judge0-csci-sign-in-form");
+  const signInBtn = document.getElementById("judge0-csci-modal-sign-in-btn");
+  const cancelBtn = document.getElementById("judge0-csci-modal-sign-in-cancel-btn");
+  const signOutBtn = document.getElementById("judge0-csci-sign-out-btn");
+
+  // Keep normal form submission from reloading the page
+  signInForm?.addEventListener("submit", function (e) {
     e.preventDefault();
     signIn(e);
   });
 
-  document.getElementById("judge0-csci-modal-sign-in-btn").addEventListener("click", signIn);
-  document.getElementById("judge0-csci-modal-sign-in-cancel-btn").addEventListener("click", hideSignInModal);
-  document.getElementById("judge0-csci-sign-out-btn").addEventListener("click", signOut);
+  // Force Enter key to trigger sign-in from anywhere inside the modal form
+  signInForm?.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      signIn(e);
+    }
+  });
 
-  // Tab-close / navigation-away sign-out.
-  //
-  // With Layer 1 (persistent SSH connection per session), every signed-in
-  // student holds an open SSH channel to csci.hsutx.edu on the server. If
-  // they just close the tab, the server wouldn't know to tear that down
-  // until the 30-minute idle-reap timer fires. sendBeacon lets us fire a
-  // best-effort POST to /ssh-sign-out during page unload — the browser
-  // guarantees delivery even as the page dies, and it doesn't block the
-  // close. The server handles the sign-out exactly like a normal one
-  // (invalidateSession → sshClient.end → delete from Map).
-  //
-  // Notes:
-  // - 'pagehide' fires more reliably than 'beforeunload' on mobile and with
-  //   back/forward cache, so we register both and let whichever fires first
-  //   do the work. The server endpoint is idempotent (a second sign-out
-  //   just returns "no active session").
-  // - sendBeacon requires a Blob with the correct Content-Type for Express's
-  //   json middleware to parse the body.
-  // - If csciSessionToken is null (never signed in, or already signed out)
-  //   we skip — nothing to clean up.
+  signInBtn?.addEventListener("click", signIn);
+  cancelBtn?.addEventListener("click", hideSignInModal);
+  signOutBtn?.addEventListener("click", signOut);
+
   function beaconSignOut() {
     if (!window.csciSessionToken) return;
     try {
@@ -164,10 +430,365 @@ document.addEventListener("DOMContentLoaded", function () {
       );
       navigator.sendBeacon("/ssh-sign-out", payload);
     } catch (err) {
-      // Nothing we can do during unload — page is going away regardless.
       console.warn("sendBeacon sign-out failed:", err);
     }
   }
+
   window.addEventListener("pagehide", beaconSignOut);
   window.addEventListener("beforeunload", beaconSignOut);
 });
+
+
+// Attach saveCurrentFile to the Save button in the UI
+document.getElementById("save-file-btn")?.addEventListener("click", () => {
+  if (typeof window.saveCurrentFile === "function") {
+    window.saveCurrentFile();
+  } else {
+    console.error("saveCurrentFile is not available.");
+  }
+});
+
+// Attach saveCurrentFile to the Save button in the UI
+document.getElementById("save-file-btn")?.addEventListener("click", () => {
+  if (typeof window.saveCurrentFile === "function") {
+    window.saveCurrentFile();
+  } else {
+    console.error("saveCurrentFile is not available.");
+  }
+});
+
+// Save the currently open file back to the server.
+// Uses the active SSH session token and the file path stored
+// when the user opened a file from the Explorer.
+async function saveCurrentFile() {
+  if (!window.sshToken) {
+    console.error("No SSH token found.");
+    return;
+  }
+
+  if (!window.currentOpenFilePath) {
+    console.error("No file is currently open.");
+    return;
+  }
+
+  if (!window.sourceEditor) {
+    console.error("Editor not initialized.");
+    return;
+  }
+
+  /*if (autosaveTimer) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+  }*/
+
+  if (window.isSaving) return;
+
+  window.isSaving = true;
+  window.updateSourceTabTitle();
+
+  const content = window.sourceEditor.getValue();
+
+  try {
+    const response = await fetch("/ssh-write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: window.sshToken,
+        path: window.currentOpenFilePath,
+        content
+      })
+    });
+
+    const result = await response.json();
+    console.log("Save result:", result);
+
+    if (!result.success) {
+      console.error("Failed to save file:", result.error);
+      return;
+    }
+
+    window.isSaving = false;
+    window.hasUnsavedChanges = false;
+    window.updateSourceTabTitle();
+
+    console.log(`Saved file: ${window.currentOpenFilePath}`);
+  } catch (err) {
+    console.error("Error saving file:", err);
+  } finally {
+    window.isSaving = false;
+    window.updateSourceTabTitle();
+  }
+}
+
+window.saveCurrentFile = saveCurrentFile;
+
+document.getElementById("sidebar-new-file")?.addEventListener("click", async () => {
+    if (!window.sshToken) {
+        console.error("No SSH token found.");
+        return;
+    }
+
+    showInlineNewItemInput("file");
+
+    // Create the file in the current directory if you are tracking one,
+    // otherwise default to the home directory.
+    const filePath = window.currentExplorerPath
+        ? `${window.currentExplorerPath}/${fileName}`
+        : `~/${fileName}`;
+
+    try {
+        const response = await fetch("/ssh-write", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                token: window.sshToken,
+                path: filePath,
+                content: ""
+            })
+        });
+
+        const result = await response.json();
+        console.log("Create file result:", result);
+
+        if (!result.success) {
+            console.error("Failed to create file:", result.error);
+            return;
+        }
+
+        // Refresh the sidebar
+        loadFileExplorer(window.currentExplorerPath || "~");
+
+        // Optionally open the new empty file immediately
+        openServerFile(result.path, fileName);
+    } catch (err) {
+        console.error("Error creating file:", err);
+    }
+});
+
+document.getElementById("sidebar-new-folder")?.addEventListener("click", () => {
+    if (!window.sshToken) {
+        console.error("No SSH token found.");
+        return;
+    }
+
+    showInlineNewItemInput("folder");
+});
+
+function showInlineNewItemInput(type) {
+    const container = document.getElementById("file-explorer-list");
+    if (!container) {
+        console.error("Explorer container not found.");
+        return;
+    }
+
+    // Prevent multiple inputs
+    if (document.getElementById("inline-new-item")) return;
+
+    const row = document.createElement("div");
+    row.id = "inline-new-item";
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.padding = "4px";
+
+    const icon = document.createElement("span");
+    icon.textContent = type === "folder" ? "📁 " : "📄 ";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = type === "folder" ? "New folder" : "New file";
+    input.style.flex = "1";
+    input.style.background = "transparent";
+    input.style.color = "white";
+    input.style.border = "1px solid #555";
+    input.style.outline = "none";
+
+    row.appendChild(icon);
+    row.appendChild(input);
+
+    container.prepend(row);
+
+    input.focus();
+
+    async function submit() {
+        const name = input.value.trim();
+        if (!name) {
+            row.remove();
+            return;
+        }
+
+        const basePath = window.currentExplorerPath || "~";
+        const fullPath = `${basePath}/${name}`;
+
+        try {
+            let response, result;
+
+            if (type === "file") {
+                response = await fetch("/ssh-write", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        token: window.sshToken,
+                        path: fullPath,
+                        content: ""
+                    })
+                });
+
+                result = await response.json();
+
+                if (!result.success) {
+                    console.error("Create file failed:", result.error);
+                    return;
+                }
+
+                await loadFileExplorer(basePath);
+                openServerFile(result.path, name);
+
+            } else {
+                response = await fetch("/ssh-mkdir", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        token: window.sshToken,
+                        path: fullPath
+                    })
+                });
+
+                result = await response.json();
+
+                if (!result.success) {
+                    console.error("Create folder failed:", result.error);
+                    return;
+                }
+
+                await loadFileExplorer(basePath);
+            }
+
+        } catch (err) {
+            console.error("Error creating item:", err);
+        } finally {
+            row.remove();
+        }
+    }
+
+    function cancel() {
+        row.remove();
+    }
+
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submit();
+        if (e.key === "Escape") cancel();
+    });
+
+    input.addEventListener("blur", () => {
+        setTimeout(() => {
+            if (document.body.contains(row)) cancel();
+        }, 100);
+    });
+}
+
+// Show an inline rename input for a file or folder in the Explorer
+async function showInlineRenameInput(entry, currentPath) {
+    const container = document.getElementById("file-explorer-list");
+    if (!container) {
+        console.error("Explorer container not found.");
+        return;
+    }
+
+    // Prevent multiple inline inputs at once
+    if (document.getElementById("inline-rename-item")) return;
+
+    const row = document.createElement("div");
+    row.id = "inline-rename-item";
+    row.className = "file-explorer-item inline-new-item";
+
+    const icon = document.createElement("span");
+    icon.textContent = entry.type === "directory" ? "📁 " : "📄 ";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "inline-new-item-input";
+    input.value = entry.name;
+
+    row.appendChild(icon);
+    row.appendChild(input);
+
+    container.prepend(row);
+
+    input.focus();
+    input.select();
+
+    async function submitRename() {
+        const newName = input.value.trim();
+
+        if (!newName || newName === entry.name) {
+            row.remove();
+            return;
+        }
+
+        const oldPath = `${currentPath}/${entry.name}`;
+        const newPath = `${currentPath}/${newName}`;
+
+        try {
+            const response = await fetch("/ssh-mv", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    token: window.sshToken,
+                    from: oldPath,
+                    to: newPath
+                })
+            });
+
+            const result = await response.json();
+            console.log("Rename result:", result);
+
+            if (!result.success) {
+                console.error("Rename failed:", result.error);
+                return;
+            }
+
+            // If the currently open file was renamed, keep tracking the new path/name
+            if (window.currentOpenFilePath === result.from) {
+                window.currentOpenFilePath = result.to;
+                window.currentOpenFileName = newName;
+
+                if (typeof window.setSourceCodeName === "function") {
+                    window.setSourceCodeName(newName);
+                } else {
+                    window.currentFileName = newName;
+                    if (typeof window.updateSourceTabTitle === "function") {
+                        window.updateSourceTabTitle();
+                    }
+                }
+            }
+
+            await loadFileExplorer(currentPath);
+        } catch (err) {
+            console.error("Error renaming item:", err);
+        } finally {
+            row.remove();
+        }
+    }
+
+    function cancelRename() {
+        row.remove();
+    }
+
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            submitRename();
+        } else if (event.key === "Escape") {
+            event.preventDefault();
+            cancelRename();
+        }
+    });
+
+    input.addEventListener("blur", () => {
+        setTimeout(() => {
+            if (document.body.contains(row)) {
+                cancelRename();
+            }
+        }, 100);
+    });
+}
