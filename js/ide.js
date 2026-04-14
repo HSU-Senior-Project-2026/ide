@@ -545,6 +545,8 @@ function newFile(filename) {
     try { localStorage.removeItem("judge0.sourceCode"); } catch (e) {}
 }
 
+window.setSourceCodeName = setSourceCodeName;
+
 function openFile(content, filename) {
     window.suppressDirty = true;                 // prevent dirty flag during load
     clear();
