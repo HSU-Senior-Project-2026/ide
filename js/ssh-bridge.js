@@ -748,8 +748,10 @@ wss.on("connection", (ws, req) => {
   const token  = params.get("token");
   const mode   = params.get("mode");
   const langId = parseInt(params.get("lang") || "0");
+  const cols   = Math.max(10, Math.min(500, parseInt(params.get("cols") || "80")));
+  const rows   = Math.max(5,  Math.min(100, parseInt(params.get("rows") || "24")));
 
-  console.log(`[WS CONNECT] mode=${mode} lang=${langId} token=${token ? token.substring(0, 8) + "..." : "none"}`);
+  console.log(`[WS CONNECT] mode=${mode} lang=${langId} cols=${cols} rows=${rows} token=${token ? token.substring(0, 8) + "..." : "none"}`);
 
   // Auth gate — reject immediately if the token is not in the sessions Map,
   // or if the underlying ssh2.Client has died since sign-in. Either case forces
@@ -894,7 +896,7 @@ wss.on("connection", (ws, req) => {
 
     console.log(`[RUN] user=${username} dir=${tmpDir}`);
 
-    sshClient.exec(runCmd, { pty: { term: "xterm-256color", cols: 220, rows: 50 } }, (err, stream) => {
+    sshClient.exec(runCmd, { pty: { term: "xterm-256color", cols, rows } }, (err, stream) => {
       if (err) {
         ws.send(`ERROR: Could not start program: ${err.message}\r\n`);
         ws.close();
@@ -919,9 +921,21 @@ wss.on("connection", (ws, req) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(data.toString());
       });
 
-      // browser → SSH: forward every keystroke from xterm.js to the program.
+      // browser → SSH: forward keystrokes to stdin, or resize the PTY.
+      // The client sends JSON { type: "resize", cols, rows } when the
+      // golden-layout panel is resized; everything else is raw keystroke data.
       ws.on("message", (data) => {
-        stream.write(data.toString());
+        const str = data.toString();
+        if (str.charAt(0) === "{") {
+          try {
+            const msg = JSON.parse(str);
+            if (msg.type === "resize" && msg.cols && msg.rows) {
+              stream.setWindow(msg.rows, msg.cols, 0, 0);
+              return;
+            }
+          } catch (_) { /* not JSON — fall through to write */ }
+        }
+        stream.write(str);
       });
 
       // Program finished normally.
@@ -956,21 +970,37 @@ wss.on("connection", (ws, req) => {
 
     console.log(`[SHELL] user=${username}`);
 
-    sshClient.shell({ term: "xterm-256color", cols: 220, rows: 50 }, (err, stream) => {
+    sshClient.shell({ term: "xterm-256color", cols, rows }, (err, stream) => {
       if (err) {
         ws.send(`ERROR: Could not open shell: ${err.message}\r\n`);
         ws.close();
         return;
       }
 
+      // Suppress zsh's PROMPT_EOL_MARK (the '%' character that appears at
+      // the end of every partial line). This is invisible to the user — it
+      // runs before the prompt appears and the command itself is hidden by
+      // the trailing \n which triggers a fresh prompt redraw.
+      stream.write('export PROMPT_EOL_MARK="" 2>/dev/null\n');
+
       // Shell → browser
       stream.on("data", (data) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(data.toString());
       });
 
-      // Browser keystrokes → shell
+      // Browser keystrokes → shell, with resize support.
       ws.on("message", (data) => {
-        stream.write(data.toString());
+        const str = data.toString();
+        if (str.charAt(0) === "{") {
+          try {
+            const msg = JSON.parse(str);
+            if (msg.type === "resize" && msg.cols && msg.rows) {
+              stream.setWindow(msg.rows, msg.cols, 0, 0);
+              return;
+            }
+          } catch (_) { /* not JSON — fall through to write */ }
+        }
+        stream.write(str);
       });
 
       // Shell exited (student typed "exit" or the channel dropped).

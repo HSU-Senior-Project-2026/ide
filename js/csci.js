@@ -125,6 +125,11 @@ async function signOut() {
     const result = await response.json();
     console.log("Server response:", result);
 
+    // Tell ide.js to tear down the persistent shell before clearing the token.
+    window.dispatchEvent(new Event("csci-signed-out"));
+
+    // Clear the token from memory — any subsequent run attempts will be rejected
+    window.csciSessionToken = null;
     showNotification("Disconnected from CSCI server.", "warning");
 
   } catch (err) {
