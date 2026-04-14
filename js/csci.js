@@ -179,6 +179,55 @@ async function loadFileExplorer(path = "~") {
 
 // Render file/folder entries into the Explorer sidebar
 function renderFileExplorer(entries, currentPath) {
+  const container = document.getElementById("file-explorer-list");
+  if (!container) {
+    console.error("Explorer container not found.");
+    return;
+  }
+
+  container.innerHTML = "";
+
+  entries.forEach((entry) => {
+    const item = document.createElement("div");
+    item.className = "file-explorer-item";
+    item.style.display = "flex";
+    item.style.justifyContent = "space-between";
+    item.style.alignItems = "center";
+
+    const label = document.createElement("span");
+    label.textContent = entry.type === "directory" ? `📁 ${entry.name}` : `📄 ${entry.name}`;
+    label.style.flex = "1";
+
+    label.addEventListener("click", () => {
+      if (entry.type === "directory") {
+        const nextPath =
+          entry.name === ".."
+            ? `${currentPath}/..`
+            : `${currentPath}/${entry.name}`;
+        loadFileExplorer(nextPath);
+      } else {
+        const filePath = `${currentPath}/${entry.name}`;
+        openServerFile(filePath, entry.name);
+      }
+    });
+
+    const renameBtn = document.createElement("button");
+    renameBtn.textContent = "Rename";
+    renameBtn.className = "sidebar-action-btn";
+    renameBtn.style.fontSize = "11px";
+    renameBtn.style.marginLeft = "8px";
+
+    renameBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      showInlineRenameInput(entry, currentPath);
+    });
+
+    item.appendChild(label);
+    item.appendChild(renameBtn);
+    container.appendChild(item);
+  });
+}
+/*function renderFileExplorer(entries, currentPath) {
   console.log("renderFileExplorer called");
   console.log("Entries being rendered:", entries);
 
@@ -212,7 +261,7 @@ function renderFileExplorer(entries, currentPath) {
 
     container.appendChild(item);
   });
-}
+}*/
 
 // Open a file from the server and load it into Monaco
 // Open a file from the server and load its contents into the Monaco editor
@@ -546,6 +595,113 @@ function showInlineNewItemInput(type) {
     input.addEventListener("blur", () => {
         setTimeout(() => {
             if (document.body.contains(row)) cancel();
+        }, 100);
+    });
+}
+
+// Show an inline rename input for a file or folder in the Explorer
+async function showInlineRenameInput(entry, currentPath) {
+    const container = document.getElementById("file-explorer-list");
+    if (!container) {
+        console.error("Explorer container not found.");
+        return;
+    }
+
+    // Prevent multiple inline inputs at once
+    if (document.getElementById("inline-rename-item")) return;
+
+    const row = document.createElement("div");
+    row.id = "inline-rename-item";
+    row.className = "file-explorer-item inline-new-item";
+
+    const icon = document.createElement("span");
+    icon.textContent = entry.type === "directory" ? "📁 " : "📄 ";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "inline-new-item-input";
+    input.value = entry.name;
+
+    row.appendChild(icon);
+    row.appendChild(input);
+
+    container.prepend(row);
+
+    input.focus();
+    input.select();
+
+    async function submitRename() {
+        const newName = input.value.trim();
+
+        if (!newName || newName === entry.name) {
+            row.remove();
+            return;
+        }
+
+        const oldPath = `${currentPath}/${entry.name}`;
+        const newPath = `${currentPath}/${newName}`;
+
+        try {
+            const response = await fetch("/ssh-mv", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    token: window.sshToken,
+                    from: oldPath,
+                    to: newPath
+                })
+            });
+
+            const result = await response.json();
+            console.log("Rename result:", result);
+
+            if (!result.success) {
+                console.error("Rename failed:", result.error);
+                return;
+            }
+
+            // If the currently open file was renamed, keep tracking the new path/name
+            if (window.currentOpenFilePath === result.from) {
+                window.currentOpenFilePath = result.to;
+                window.currentOpenFileName = newName;
+
+                if (typeof window.setSourceCodeName === "function") {
+                    window.setSourceCodeName(newName);
+                } else {
+                    window.currentFileName = newName;
+                    if (typeof window.updateSourceTabTitle === "function") {
+                        window.updateSourceTabTitle();
+                    }
+                }
+            }
+
+            await loadFileExplorer(currentPath);
+        } catch (err) {
+            console.error("Error renaming item:", err);
+        } finally {
+            row.remove();
+        }
+    }
+
+    function cancelRename() {
+        row.remove();
+    }
+
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            submitRename();
+        } else if (event.key === "Escape") {
+            event.preventDefault();
+            cancelRename();
+        }
+    });
+
+    input.addEventListener("blur", () => {
+        setTimeout(() => {
+            if (document.body.contains(row)) {
+                cancelRename();
+            }
         }, 100);
     });
 }

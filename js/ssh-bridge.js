@@ -609,6 +609,50 @@ app.post("/ssh-mkdir", async (req, res) => {
   }
 });
 
+// Rename or move a file/folder in the signed-in user's workspace
+app.post("/ssh-mv", async (req, res) => {
+  const { token, from, to } = req.body;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Missing session token"
+    });
+  }
+
+  if (!from || !to) {
+    return res.status(400).json({
+      success: false,
+      error: "Both 'from' and 'to' paths are required"
+    });
+  }
+
+  try {
+    const resolvedFrom = await validatePathForToken(token, from);
+    const resolvedTo = await validatePathForToken(token, to);
+
+    await sshExecForToken(
+      token,
+      `mv ${JSON.stringify(resolvedFrom)} ${JSON.stringify(resolvedTo)}`
+    );
+
+    return res.json({
+      success: true,
+      from: resolvedFrom,
+      to: resolvedTo,
+      message: "Rename successful"
+    });
+  } catch (err) {
+    console.error("[SSH-MV ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    return res.status(status).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+
 // Maps Judge0 language IDs to the filenames and shell commands needed on the
 // CSCI server. compile: null means the language is interpreted — no compile
 // step needed, we just write the file and mark it ready to run immediately.
