@@ -33,7 +33,6 @@ var AUTOSAVE_MS = 5000; // 2–5 seconds (pick what you want)
 export var sourceEditor;
 export var sourceContainer;
 window.sourceEditors = {}; // Manages concurrent Monaco models
-var stdinEditor;
 var compileOutEditor;
 
 var $selectLanguage;
@@ -45,9 +44,11 @@ var $statusLine;
 var $compileBtn;
 var lastCompiledCode=null;
 
-// Tracks the currently open WebSocket to the ssh-bridge terminal endpoint.
-// Kept here so we can close it before opening a new one when Run is clicked again.
-var activeTerminalWS = null;
+// Tracks the currently open WebSocket for the run session (Output panel).
+var activeRunWS = null;
+// Tracks the persistent shell WebSocket (Shell panel). Opened on sign-in,
+// closed on sign-out or tab close. Unlike activeRunWS this lives across runs.
+var activeShellWS = null;
 
 
 
@@ -130,19 +131,12 @@ var layoutConfig = {
             type: configuration.get("appOptions.assistantLayout"),
             title: "AI Assistant and I/O",
             content: [{
-                type: configuration.get("appOptions.ioLayout"),
+                type: "column",
                 title: "I/O",
-                content: [
-                    configuration.get("appOptions.showInput") ? {
-                        type: "component",
-                        componentName: "stdin",
-                        id: "stdin",
-                        title: "Input",
-                        isClosable: false,
-                        componentState: {
-                            readOnly: false
-                        }
-                    } : null, configuration.get("appOptions.showOutput") ? {
+                content: [{
+                    type: "stack",
+                    height: 50,
+                    content: [{
                         type: "component",
                         componentName: "compileOut",
                         id: "compileOut",
@@ -151,15 +145,22 @@ var layoutConfig = {
                         componentState: {
                             readOnly: true
                         }
-                    } : null,
-                    configuration.get("appOptions.showOutput") ? {
+                    }, {
                         type: "component",
-                        componentName: "terminal",
-                        id: "terminal",
-                        title: "Terminal",
+                        componentName: "output",
+                        id: "output",
+                        title: "Output",
                         isClosable: false,
                         componentState: {}
-                    } : null].filter(Boolean)
+                    }]
+                }, {
+                    type: "component",
+                    componentName: "shell",
+                    id: "shell",
+                    title: "Shell",
+                    isClosable: false,
+                    componentState: {}
+                }]
             }].filter(Boolean)
         }]
     }]
@@ -185,8 +186,6 @@ function showError(title, content) {
 
 // Clear I/O editors and status line before running new code
 function clearIO() {
-    // Clear the I/O editors
-    if (stdinEditor) stdinEditor.setValue("");
     if (compileOutEditor) compileOutEditor.setValue("");
 
     // Optional: clear old status line
@@ -356,21 +355,23 @@ function autoCompileThenRun(currentCode, languageId) {
 }
 
 // Shared logic for opening the run WebSocket (used by both run() and autoCompileThenRun).
+// Program I/O goes to the Output panel, not the Shell, so the shell stays undisturbed.
 function startRunWebSocket(token, languageId) {
-    const termTab = layout.root.getItemsById("terminal")[0];
-    if (termTab && termTab.parent && termTab.parent.header && termTab.parent.header.parent) {
-        termTab.parent.header.parent.setActiveContentItem(termTab);
+    // Switch to the Output tab so the student sees program output.
+    const outTab = layout.root.getItemsById("output")[0];
+    if (outTab && outTab.parent && outTab.parent.header && outTab.parent.header.parent) {
+        outTab.parent.header.parent.setActiveContentItem(outTab);
     }
 
-    const term = window.sshTerminal;
+    const term = window.outputTerminal;
     if (!term) {
         $runBtn.removeClass("loading");
         return;
     }
 
-    if (activeTerminalWS) {
-        activeTerminalWS.close();
-        activeTerminalWS = null;
+    if (activeRunWS) {
+        activeRunWS.close();
+        activeRunWS = null;
     }
 
     term.clear();
@@ -381,7 +382,7 @@ function startRunWebSocket(token, languageId) {
     const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=run&lang=${languageId}&cols=${cols}&rows=${rows}`;
 
     const ws = new WebSocket(wsUrl);
-    activeTerminalWS = ws;
+    activeRunWS = ws;
 
     ws.onmessage = (event) => {
         term.write(event.data);
@@ -393,9 +394,6 @@ function startRunWebSocket(token, languageId) {
         }
     });
 
-    // When the terminal is resized while a program is running, notify the
-    // server so it can resize the PTY to match. Without this, line wrapping
-    // and cursor positioning break after a panel resize.
     const resizeDisposable = term.onResize(({ cols, rows }) => {
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "resize", cols, rows }));
@@ -409,7 +407,7 @@ function startRunWebSocket(token, languageId) {
     ws.onclose = () => {
         dataDisposable.dispose();
         resizeDisposable.dispose();
-        activeTerminalWS = null;
+        activeRunWS = null;
         $runBtn.removeClass("loading");
         $statusLine.html("Program finished.");
     };
@@ -426,8 +424,8 @@ function run() {
     // window.csciSessionToken is set by csci.js after a successful sign-in.
     const token = window.csciSessionToken;
     if (!token) {
-        if (window.sshTerminal) {
-            window.sshTerminal.write("\r\nERROR: Not signed in. Please sign in to the CSCI server first.\r\n");
+        if (window.outputTerminal) {
+            window.outputTerminal.write("\r\nERROR: Not signed in. Please sign in to the CSCI server first.\r\n");
         }
         return;
     }
@@ -456,28 +454,27 @@ function run() {
     startRunWebSocket(token, languageId);
 }
 
+// Opens a persistent shell WebSocket in the Shell panel. Called automatically
+// on sign-in and can be called again via the Shell button to reconnect.
 function openShell() {
     const token = window.csciSessionToken;
     if (!token) {
-        if (window.sshTerminal) {
-            window.sshTerminal.write("\r\nERROR: Not signed in. Please sign in to the CSCI server first.\r\n");
+        if (window.shellTerminal) {
+            window.shellTerminal.write("\r\nERROR: Not signed in. Please sign in to the CSCI server first.\r\n");
         }
         return;
     }
 
-    // Switch to the terminal tab.
-    const termTab = layout.root.getItemsById("terminal")[0];
-    if (termTab && termTab.parent && termTab.parent.header && termTab.parent.header.parent) {
-        termTab.parent.header.parent.setActiveContentItem(termTab);
-    }
-
-    const term = window.sshTerminal;
+    const term = window.shellTerminal;
     if (!term) return;
 
-    // Close any existing connection (previous run or shell session).
-    if (activeTerminalWS) {
-        activeTerminalWS.close();
-        activeTerminalWS = null;
+    // If a shell WS is already open and healthy, just focus the panel.
+    if (activeShellWS && activeShellWS.readyState === WebSocket.OPEN) return;
+
+    // Close any dead/closing WS before opening a fresh one.
+    if (activeShellWS) {
+        activeShellWS.close();
+        activeShellWS = null;
     }
 
     term.clear();
@@ -489,7 +486,7 @@ function openShell() {
     const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=shell&cols=${cols}&rows=${rows}`;
 
     const ws = new WebSocket(wsUrl);
-    activeTerminalWS = ws;
+    activeShellWS = ws;
 
     ws.onmessage = (event) => {
         term.write(event.data);
@@ -501,7 +498,6 @@ function openShell() {
         }
     });
 
-    // Keep the server PTY in sync when the panel is resized mid-session.
     const resizeDisposable = term.onResize(({ cols, rows }) => {
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "resize", cols, rows }));
@@ -515,7 +511,7 @@ function openShell() {
     ws.onclose = () => {
         dataDisposable.dispose();
         resizeDisposable.dispose();
-        activeTerminalWS = null;
+        activeShellWS = null;
         $statusLine.html("Shell disconnected.");
     };
 
@@ -523,6 +519,19 @@ function openShell() {
         term.write("\r\nERROR: Lost connection to server.\r\n");
         $statusLine.html("Connection error.");
     };
+}
+
+// Tears down the shell WebSocket. Called on sign-out so the persistent
+// shell doesn't outlive the SSH session.
+function closeShell() {
+    if (activeShellWS) {
+        activeShellWS.close();
+        activeShellWS = null;
+    }
+    if (window.shellTerminal) {
+        window.shellTerminal.clear();
+        window.shellTerminal.write("Sign in to the CSCI server to open a shell.\r\n");
+    }
 }
 
 // Helper function to update the source tab title with unsaved changes indicator and saving status
@@ -631,7 +640,6 @@ function setFontSizeForAllEditors(fontSize) {
     Object.values(window.sourceEditors).forEach(ed => {
         if (ed) ed.updateOptions({ fontSize });
     });
-    if (stdinEditor) stdinEditor.updateOptions({ fontSize });
     if (compileOutEditor) compileOutEditor.updateOptions({ fontSize });
 }
 
@@ -679,7 +687,6 @@ function selectLanguageForExtension(extension) {
 function setDefaults() {
     setFontSizeForAllEditors(fontSize);
     sourceEditor.setValue(DEFAULT_SOURCE);
-    stdinEditor.setValue("");
     $compilerOptions.val(DEFAULT_COMPILER_OPTIONS);
     $commandLineArguments.val(DEFAULT_CMD_ARGUMENTS);
 
@@ -690,7 +697,6 @@ function setDefaults() {
 
 function clear() {
     sourceEditor.setValue("");
-    stdinEditor.setValue("");
     $compilerOptions.val("");
     $commandLineArguments.val("");
 
@@ -755,6 +761,11 @@ document.addEventListener("DOMContentLoaded", async function () {
     $clearBtn.click(clearIO);
     $compileBtn.click(compileOnly);
     $("#shell-btn").click(openShell);
+
+    // Auto-open the persistent shell when the student signs in, and tear it
+    // down on sign-out. csci.js dispatches these events after the HTTP calls.
+    window.addEventListener("csci-signed-in", openShell);
+    window.addEventListener("csci-signed-out", closeShell);
 
     $("#open-file-input").change(function (e) {
         const selectedFile = e.target.files[0];
@@ -1044,47 +1055,6 @@ document.addEventListener("DOMContentLoaded", async function () {
             });*/
         });
 
-        layout.registerComponent("stdin", function (container, state) {
-            var el = container.getElement()[0];
-
-            // Add placeholder overlay for stdin
-            var placeholder = document.createElement("div");
-            placeholder.className = "stdin-placeholder";
-            placeholder.textContent = "Enter input for your program here (e.g. values read by stdin)";
-            placeholder.style.cssText = "position:absolute;top:0;color:#888;pointer-events:none;z-index:1;padding:2px 0;font-family:'JetBrains Mono',monospace;";
-            el.style.position = "relative";
-            el.appendChild(placeholder);
-
-            stdinEditor = monaco.editor.create(el, {
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-                readOnly: state.readOnly,
-                language: "plaintext",
-                minimap: {
-                    enabled: false
-                }
-            });
-
-            // Sync placeholder position and size with editor gutter/font
-            function updatePlaceholderPosition() {
-                var layoutInfo = stdinEditor.getLayoutInfo();
-                var opts = stdinEditor.getOptions();
-                var currentFontSize = opts.get(monaco.editor.EditorOption.fontSize);
-                placeholder.style.left = layoutInfo.contentLeft + "px";
-                placeholder.style.fontSize = currentFontSize + "px";
-                placeholder.style.lineHeight = stdinEditor.getOption(monaco.editor.EditorOption.lineHeight) + "px";
-            }
-            stdinEditor.onDidLayoutChange(updatePlaceholderPosition);
-            updatePlaceholderPosition();
-
-            // Show/hide placeholder based on content
-            function togglePlaceholder() {
-                placeholder.style.display = stdinEditor.getValue() ? "none" : "block";
-            }
-            stdinEditor.onDidChangeModelContent(togglePlaceholder);
-            togglePlaceholder();
-        });
-
         layout.registerComponent("compileOut", function (container, state) {
             compileOutEditor = monaco.editor.create(container.getElement()[0], {
                 automaticLayout: true,
@@ -1096,9 +1066,9 @@ document.addEventListener("DOMContentLoaded", async function () {
             });
         });
 
-        layout.registerComponent("terminal", function (container) {
-            // Create a div that fills the entire golden-layout panel.
-            // xterm.js renders its canvas inside this div.
+        // Helper: create an xterm.js instance inside a golden-layout container.
+        // Used for both the Output and Shell panels.
+        function createXterm(container, placeholder) {
             const termDiv = document.createElement("div");
             termDiv.style.width = "100%";
             termDiv.style.height = "100%";
@@ -1106,49 +1076,43 @@ document.addEventListener("DOMContentLoaded", async function () {
             termDiv.style.backgroundColor = "#1e1e1e";
             container.getElement()[0].appendChild(termDiv);
 
-            // Create the xterm.js terminal instance.
-            // convertEol: true  → treats \n from the server as \r\n so lines don't
-            //                     staircase down the screen without returning to the left.
-            // scrollback: 1000  → remembers up to 1000 lines above the visible area.
-            // fontFamily        → matches the JetBrains Mono font already used in the editor.
             const term = new Terminal({
                 convertEol: true,
                 scrollback: 1000,
                 fontSize: 13,
                 fontFamily: "JetBrains Mono, monospace",
-                theme: {
-                    background: "#1e1e1e",
-                    foreground: "#d4d4d4"
-                }
+                theme: { background: "#1e1e1e", foreground: "#d4d4d4" }
             });
 
-            // FitAddon measures actual character dimensions to calculate the correct
-            // number of cols/rows for the container size. Without it, manual estimates
-            // (e.g. container.width / 8) drift from reality and cause clipping — the
-            // terminal renders more rows than fit, so content scrolls off the bottom
-            // and the user can't see what they're typing.
             const fitAddon = new FitAddon.FitAddon();
             term.loadAddon(fitAddon);
-
             term.open(termDiv);
-
-            // Initial fit — must happen after open() so the DOM is measured.
             try { fitAddon.fit(); } catch (e) { /* container may not be sized yet */ }
 
-            // Static placeholder text so we can confirm the terminal is rendering
-            // correctly before wiring it to the WebSocket in the next step.
-            term.write("Terminal ready.\r\n");
-            term.write("Sign in to the CSCI server and click Run to begin.\r\n");
+            if (placeholder) term.write(placeholder);
 
-            // Store the terminal and fitAddon on window so run()/openShell() can
-            // read the current cols/rows and send them to the server for PTY sizing.
-            window.sshTerminal = term;
-            window.sshFitAddon = fitAddon;
-
-            // When the golden-layout panel is resized, re-fit the terminal.
             container.on("resize", function () {
                 try { fitAddon.fit(); } catch (e) { /* ignore during init */ }
             });
+
+            return { term, fitAddon };
+        }
+
+        // Output panel — displays run output (program I/O). Separate from the
+        // shell so running code doesn't steal focus from an active shell session.
+        layout.registerComponent("output", function (container) {
+            const { term, fitAddon } = createXterm(container, "Click Run to execute your code.\r\n");
+            window.outputTerminal = term;
+            window.outputFitAddon = fitAddon;
+        });
+
+        // Shell panel — persistent interactive SSH shell. Auto-connected on
+        // sign-in and stays open for the entire session. Always visible below
+        // the Compile/Output tabs so students can use it while code runs above.
+        layout.registerComponent("shell", function (container) {
+            const { term, fitAddon } = createXterm(container, "Sign in to the CSCI server to open a shell.\r\n");
+            window.shellTerminal = term;
+            window.shellFitAddon = fitAddon;
         });
 
         layout.registerComponent("ai", function (container, state) {
@@ -1253,7 +1217,6 @@ document.addEventListener("DOMContentLoaded", async function () {
             setFontSizeForAllEditors(fontSize);
             var wrapSetting = localStorage.getItem("judge0.wordWrap") !== "off" ? "on" : "off";
             Object.values(window.sourceEditors).forEach(ed => { if (ed) ed.updateOptions({ wordWrap: wrapSetting }); });
-            if (stdinEditor) stdinEditor.updateOptions({ wordWrap: wrapSetting });
             if (compileOutEditor) compileOutEditor.updateOptions({ wordWrap: wrapSetting });
             window.top.postMessage({ event: "initialised" }, "*");
         });
@@ -1374,7 +1337,6 @@ document.addEventListener("DOMContentLoaded", async function () {
     function applyWordWrap() {
         var setting = wordWrapEnabled ? "on" : "off";
         Object.values(window.sourceEditors).forEach(ed => { if (ed) ed.updateOptions({ wordWrap: setting }); });
-        if (stdinEditor) stdinEditor.updateOptions({ wordWrap: setting });
         if (compileOutEditor) compileOutEditor.updateOptions({ wordWrap: setting });
         if ($wordWrapBtn) {
             if (wordWrapEnabled) {
@@ -1403,7 +1365,6 @@ document.addEventListener("DOMContentLoaded", async function () {
                 event: "getResponse",
                 source_code: sourceEditor.getValue(),
                 language_id: getSelectedLanguageId(),
-                stdin: stdinEditor.getValue(),
                 compiler_options: $compilerOptions.val(),
                 command_line_arguments: $commandLineArguments.val()
             })), "*");
@@ -1413,9 +1374,6 @@ document.addEventListener("DOMContentLoaded", async function () {
             }
             if (e.data.language_id) {
                 selectLanguageById(e.data.language_id);
-            }
-            if (e.data.stdin) {
-                stdinEditor.setValue(e.data.stdin);
             }
             if (e.data.compiler_options) {
                 $compilerOptions.val(e.data.compiler_options);
