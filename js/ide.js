@@ -248,8 +248,9 @@ function compileOnly() {
     }
 
     const langId   = getSelectedLanguageId();
+    const fileName = encodeURIComponent(window.currentFileName || "");
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl    = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${langId}`;
+    const wsUrl    = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${langId}&file=${fileName}`;
 
     const ws = new WebSocket(wsUrl);
     let compileOutput = "";
@@ -324,8 +325,9 @@ function updateRunButtonState() {
 // For interpreted languages: upload the code via compile WS, then immediately run.
 function autoCompileThenRun(currentCode, languageId) {
     const token = window.csciSessionToken;
+    const fileName = encodeURIComponent(window.currentFileName || "");
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const compileUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${languageId}`;
+    const compileUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${languageId}&file=${fileName}`;
 
     const compileWs = new WebSocket(compileUrl);
 

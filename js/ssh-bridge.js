@@ -704,33 +704,47 @@ app.post("/ssh-rm", async (req, res) => {
 // Maps Judge0 language IDs to the filenames and shell commands needed on the
 // CSCI server. compile: null means the language is interpreted — no compile
 // step needed, we just write the file and mark it ready to run immediately.
-const LANGUAGE_COMMANDS = {
-    // Java — Judge0 lists Java under several IDs depending on the JDK version.
-    // All of them compile and run identically on the CSCI server.
-    62:  { file: "Main.java",  compile: "javac Main.java",       run: "java -cp . Main"  },
-    91:  { file: "Main.java",  compile: "javac Main.java",       run: "java -cp . Main"  },
-    27:  { file: "Main.java",  compile: "javac Main.java",       run: "java -cp . Main"  },
-
-    // C
-    103: { file: "main.c",     compile: "gcc main.c -o main",    run: "./main"           },
-    4:   { file: "main.c",     compile: "gcc main.c -o main",    run: "./main"           },
-
-    // C++
-    105: { file: "main.cpp",   compile: "g++ main.cpp -o main",  run: "./main"           },
-    10:  { file: "main.cpp",   compile: "g++ main.cpp -o main",  run: "./main"           },
-
-    // Python — no compile step needed
-    25:  { file: "main.py",    compile: null,                    run: "python3 main.py"  },
-    70:  { file: "main.py",    compile: null,                    run: "python3 main.py"  },
-    71:  { file: "main.py",    compile: null,                    run: "python3 main.py"  },
-
-    // JavaScript (Node.js)
-    102: { file: "main.js",    compile: null,                    run: "node main.js"     },
-    63:  { file: "main.js",    compile: null,                    run: "node main.js"     },
-
-    // Bash
-    46:  { file: "main.sh",    compile: null,                    run: "bash main.sh"     },
+// Maps Judge0 language IDs to their language type. The actual filenames and
+// compile/run commands are derived at runtime from the filename the student
+// has open in the editor, so that e.g. `HelloWorld.java` compiles as
+// `javac HelloWorld.java` and runs as `java -cp . HelloWorld`.
+const LANGUAGE_TYPES = {
+    62: "java", 91: "java", 27: "java",
+    103: "c",   4:  "c",
+    105: "cpp", 10: "cpp",
+    25: "py",   70: "py",   71: "py",
+    102: "js",  63: "js",
+    46: "sh",
 };
+
+// Default filenames per language type — used when the client doesn't send one.
+const DEFAULT_FILES = {
+    java: "Main.java", c: "main.c", cpp: "main.cpp",
+    py: "main.py", js: "main.js", sh: "main.sh",
+};
+
+// Build compile and run commands from the actual filename and language type.
+// For Java the filename is critical (must match public class name); for others
+// it only matters that we use a consistent name for write → compile → run.
+function getCommandsForFile(langType, sourceFile) {
+    const base = sourceFile.replace(/\.[^.]+$/, ""); // strip extension
+    switch (langType) {
+        case "java":
+            return { file: sourceFile, compile: `javac ${sourceFile}`, run: `java -cp . ${base}` };
+        case "c":
+            return { file: sourceFile, compile: `gcc ${sourceFile} -o main`, run: "./main" };
+        case "cpp":
+            return { file: sourceFile, compile: `g++ ${sourceFile} -o main`, run: "./main" };
+        case "py":
+            return { file: sourceFile, compile: null, run: `python3 ${sourceFile}` };
+        case "js":
+            return { file: sourceFile, compile: null, run: `node ${sourceFile}` };
+        case "sh":
+            return { file: sourceFile, compile: null, run: `bash ${sourceFile}` };
+        default:
+            return null;
+    }
+}
 
 // Start HTTP server on port 3000.
 // Saved to a variable so the WebSocket server can attach to the same port —
@@ -744,14 +758,15 @@ const httpServer = http.createServer(app);
 const wss = new WebSocket.Server({ server: httpServer });
 
 wss.on("connection", (ws, req) => {
-  const params = new URLSearchParams(req.url.split("?")[1] || "");
-  const token  = params.get("token");
-  const mode   = params.get("mode");
-  const langId = parseInt(params.get("lang") || "0");
-  const cols   = Math.max(10, Math.min(500, parseInt(params.get("cols") || "80")));
-  const rows   = Math.max(5,  Math.min(100, parseInt(params.get("rows") || "24")));
+  const params   = new URLSearchParams(req.url.split("?")[1] || "");
+  const token    = params.get("token");
+  const mode     = params.get("mode");
+  const langId   = parseInt(params.get("lang") || "0");
+  const fileName = params.get("file") || "";   // actual filename from the editor tab
+  const cols     = Math.max(10, Math.min(500, parseInt(params.get("cols") || "80")));
+  const rows     = Math.max(5,  Math.min(100, parseInt(params.get("rows") || "24")));
 
-  console.log(`[WS CONNECT] mode=${mode} lang=${langId} cols=${cols} rows=${rows} token=${token ? token.substring(0, 8) + "..." : "none"}`);
+  console.log(`[WS CONNECT] mode=${mode} lang=${langId} file=${fileName} cols=${cols} rows=${rows} token=${token ? token.substring(0, 8) + "..." : "none"}`);
 
   // Auth gate — reject immediately if the token is not in the sessions Map,
   // or if the underlying ssh2.Client has died since sign-in. Either case forces
@@ -793,41 +808,32 @@ wss.on("connection", (ws, req) => {
   // to decide whether to enable the Run button.
   // ─────────────────────────────────────────────────────────────────────────
   if (mode === "compile") {
-    const lang = LANGUAGE_COMMANDS[langId];
-    if (!lang) {
+    const langType = LANGUAGE_TYPES[langId];
+    if (!langType) {
       ws.send(`ERROR: Language ID ${langId} is not supported for SSH execution.\r\n`);
       ws.close(4001, "unsupported-language");
       return;
     }
+
+    // Derive the source filename: prefer the actual name from the editor tab,
+    // fall back to the default for this language type. This is critical for Java
+    // where the filename must match the public class name.
+    const sourceFile = fileName || DEFAULT_FILES[langType];
+    const lang = getCommandsForFile(langType, sourceFile);
 
     // Wait for exactly one message containing the raw source code.
     ws.once("message", (rawData) => {
       const sourceCode = rawData.toString();
       const { username } = session;
 
-      // Each student gets a unique temp directory based on their session token.
-      // Using token.substring(0,16) keeps the path short while still being unique.
       const tmpDir = `/tmp/judge0_${token.substring(0, 16)}`;
-
-      // Base64-encode the source code in Node before sending it to the shell.
-      // This means no matter what characters the student typed — quotes,
-      // backslashes, dollar signs — the file is written safely without any
-      // shell interpretation. printf decodes it byte-for-byte on the other end.
       const b64 = Buffer.from(sourceCode).toString("base64");
 
-      // Build the full command string:
-      // 1. Delete any previous compile attempt for this student
-      // 2. Create a fresh temp directory
-      // 3. Decode the base64 source into the correct filename
-      // 4. If a compile command exists, run it; otherwise skip (interpreted languages)
       const compileStep = lang.compile ? ` && cd ${tmpDir} && ${lang.compile}` : "";
       const fullCmd = `rm -rf ${tmpDir} && mkdir -p ${tmpDir} && printf '%s' '${b64}' | base64 -d > ${tmpDir}/${lang.file}${compileStep}`;
 
-      console.log(`[COMPILE] user=${username} dir=${tmpDir} lang=${langId}`);
+      console.log(`[COMPILE] user=${username} dir=${tmpDir} file=${lang.file} lang=${langId}`);
 
-      // exec() opens a new channel on the shared client — NOT a new connection.
-      // Do NOT call sshClient.end() anywhere in this handler; the client must
-      // outlive this channel so other operations can reuse it.
       sshClient.exec(fullCmd, (err, stream) => {
         if (err) {
           ws.send(`ERROR: Could not start compile: ${err.message}\r\n`);
@@ -835,21 +841,22 @@ wss.on("connection", (ws, req) => {
           return;
         }
 
-        // Stream stdout and stderr directly to the browser as they arrive.
         stream.on("data", (data) => ws.send(data.toString()));
         stream.stderr.on("data", (data) => ws.send(data.toString()));
 
         stream.on("close", (exitCode) => {
           if (exitCode === 0) {
-            // Store the temp dir and language in the session so run() can find them.
+            // Store the temp dir, language, AND the run command in the session
+            // so the run handler uses the correct filename-derived command.
             session.tmpDir  = tmpDir;
             session.langId  = langId;
+            session.runCmd  = lang.run;
             console.log(`[COMPILE SUCCESS] user=${username}`);
-            ws.close(4000, "success"); // 4000 signals success to the browser
+            ws.close(4000, "success");
           } else {
             session.tmpDir = null;
             console.log(`[COMPILE FAILED] user=${username} exitCode=${exitCode}`);
-            ws.close(4001, "failed");  // 4001 signals failure to the browser
+            ws.close(4001, "failed");
           }
         });
       });
@@ -866,33 +873,18 @@ wss.on("connection", (ws, req) => {
   //   xterm.js keystrokes → WebSocket → SSH stdin
   // ─────────────────────────────────────────────────────────────────────────
   if (mode === "run") {
-    if (!session.tmpDir || !session.langId) {
+    if (!session.tmpDir || !session.runCmd) {
       ws.send("ERROR: No compiled code found. Please compile before running.\r\n");
       ws.close();
       return;
     }
 
-    const lang     = LANGUAGE_COMMANDS[session.langId];
     const { username, tmpDir } = session;
 
-    // Build the run command using exec so that the student's program *replaces*
-    // the shell process and becomes the direct owner of the PTY. This is critical
-    // for interactive I/O: without exec, the program runs as a grandchild process
-    // that is NOT in the PTY's foreground process group, which causes reads from
-    // stdin to hang after the first input (the terminal driver sends SIGTTIN to
-    // background processes attempting to read).
-    //
-    // Previously we used `timeout 30` here, but GNU timeout creates a new process
-    // group for its child by default, which broke the PTY foreground group ownership
-    // and caused Scanner/scanf/input() to freeze after the first interactive read.
-    //
-    //   ulimit -t 10  — CPU time limit; catches infinite loops
-    //   exec          — replaces the shell with the program so it owns the PTY
-    //
-    // Wall-clock timeout is enforced in Node.js below (RUN_TIMEOUT_MS) instead of
-    // relying on the `timeout` command, since we need the program to be the PTY
-    // session leader for interactive I/O to work correctly.
-    const runCmd = `ulimit -t 10 && cd ${tmpDir} && exec ${lang.run}`;
+    // exec replaces the shell with the program so it owns the PTY directly.
+    // session.runCmd was set by the compile handler using the actual filename
+    // (e.g. "java -cp . HelloWorld" instead of hardcoded "java -cp . Main").
+    const runCmd = `ulimit -t 10 && cd ${tmpDir} && exec ${session.runCmd}`;
 
     console.log(`[RUN] user=${username} dir=${tmpDir}`);
 
