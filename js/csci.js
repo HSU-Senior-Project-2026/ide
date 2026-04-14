@@ -211,57 +211,92 @@ function renderFileExplorer(entries, currentPath) {
       }
     });
 
+    const actions = document.createElement("div");
+    actions.style.display = "flex";
+    actions.style.gap = "6px";
+    actions.style.marginLeft = "8px";
+
     const renameBtn = document.createElement("button");
     renameBtn.textContent = "Rename";
     renameBtn.className = "sidebar-action-btn";
     renameBtn.style.fontSize = "11px";
-    renameBtn.style.marginLeft = "8px";
 
     renameBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       showInlineRenameInput(entry, currentPath);
     });
 
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "Delete";
+    deleteBtn.className = "sidebar-action-btn";
+    deleteBtn.style.fontSize = "11px";
+
+    deleteBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteExplorerItem(entry, currentPath);
+    });
+
+    actions.appendChild(renameBtn);
+    actions.appendChild(deleteBtn);
+
     item.appendChild(label);
-    item.appendChild(renameBtn);
+    item.appendChild(actions);
     container.appendChild(item);
   });
 }
-/*function renderFileExplorer(entries, currentPath) {
-  console.log("renderFileExplorer called");
-  console.log("Entries being rendered:", entries);
+// Delete a file or empty folder from the Explorer
+async function deleteExplorerItem(entry, currentPath) {
+    if (!window.sshToken) {
+        console.error("No SSH token found.");
+        return;
+    }
 
-  const container = document.getElementById("file-explorer-list");
-  console.log("Explorer container:", container);
-  
-  if (!container) {
-    console.error("Explorer container not found.");
-    return;
-  }
+    const targetPath = `${currentPath}/${entry.name}`;
+    const confirmed = confirm(`Delete ${entry.name}?`);
 
-  container.innerHTML = "";
+    if (!confirmed) return;
 
-  entries.forEach((entry) => {
-    const item = document.createElement("div");
-    item.className = "file-explorer-item";
-    item.textContent = entry.type === "directory" ? `📁 ${entry.name}` : `📄 ${entry.name}`;
+    try {
+        const response = await fetch("/ssh-rm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                token: window.sshToken,
+                path: targetPath
+            })
+        });
 
-    item.addEventListener("click", () => {
-      if (entry.type === "directory") {
-        const nextPath =
-          entry.name === ".."
-            ? `${currentPath}/..`
-            : `${currentPath}/${entry.name}`;
-        loadFileExplorer(nextPath);
-      } else {
-        const filePath = `${currentPath}/${entry.name}`;
-        openServerFile(filePath, entry.name);
-      }
-    });
+        const result = await response.json();
+        console.log("Delete result:", result);
 
-    container.appendChild(item);
-  });
-}*/
+        if (!result.success) {
+            console.error("Delete failed:", result.error);
+            return;
+        }
+
+        // If the currently open file was deleted, clear editor state
+        if (window.currentOpenFilePath === result.path) {
+            if (window.sourceEditor) {
+                window.suppressDirty = true;
+                window.sourceEditor.setValue("");
+                window.suppressDirty = false;
+            }
+
+            window.currentOpenFilePath = null;
+            window.currentOpenFileName = null;
+            window.currentFileName = "Main.java";
+            window.hasUnsavedChanges = false;
+
+            if (typeof window.updateSourceTabTitle === "function") {
+                window.updateSourceTabTitle();
+            }
+        }
+
+        await loadFileExplorer(currentPath);
+    } catch (err) {
+        console.error("Error deleting item:", err);
+    }
+}
 
 // Open a file from the server and load it into Monaco
 // Open a file from the server and load its contents into the Monaco editor

@@ -652,6 +652,54 @@ app.post("/ssh-mv", async (req, res) => {
   }
 });
 
+// Delete a file or an empty directory in the signed-in user's workspace
+app.post("/ssh-rm", async (req, res) => {
+  const { token, path: targetPath } = req.body;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Missing session token"
+    });
+  }
+
+  if (!targetPath) {
+    return res.status(400).json({
+      success: false,
+      error: "Path is required"
+    });
+  }
+
+  try {
+    const resolvedPath = await validatePathForToken(token, targetPath);
+
+    // Check whether target is a directory
+    const fileType = (await sshExecForToken(
+      token,
+      `stat -c %F ${JSON.stringify(resolvedPath)}`
+    )).trim();
+
+    if (fileType === "directory") {
+      // Only removes empty directories
+      await sshExecForToken(token, `rmdir ${JSON.stringify(resolvedPath)}`);
+    } else {
+      await sshExecForToken(token, `rm ${JSON.stringify(resolvedPath)}`);
+    }
+
+    return res.json({
+      success: true,
+      path: resolvedPath,
+      message: "Delete successful"
+    });
+  } catch (err) {
+    console.error("[SSH-RM ERROR]", err.message);
+    const status = err.message.includes("Access denied") ? 403 : 500;
+    return res.status(status).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
 
 // Maps Judge0 language IDs to the filenames and shell commands needed on the
 // CSCI server. compile: null means the language is interpreted — no compile
