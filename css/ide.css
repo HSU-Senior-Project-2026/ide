@@ -462,3 +462,14 @@ body.light-theme .sidebar-placeholder { color: #999999; }
   opacity: 1;                     /* show on hover */
 }
 
+.file-actions i {
+  color: #aaa;        /* default color (gray) */
+}
+
+.file-item:hover .file-actions i {
+  color: #ccc;        /* slightly brighter on hover */
+}
+
+.file-actions i:hover {
+  color: #fff;        /* bright white when hovering icon */
+}
