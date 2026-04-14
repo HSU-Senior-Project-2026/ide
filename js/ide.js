@@ -1100,24 +1100,32 @@ document.addEventListener("DOMContentLoaded", async function () {
                 }
             });
 
+            // FitAddon measures actual character dimensions to calculate the correct
+            // number of cols/rows for the container size. Without it, manual estimates
+            // (e.g. container.width / 8) drift from reality and cause clipping — the
+            // terminal renders more rows than fit, so content scrolls off the bottom
+            // and the user can't see what they're typing.
+            const fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+
             term.open(termDiv);
+
+            // Initial fit — must happen after open() so the DOM is measured.
+            try { fitAddon.fit(); } catch (e) { /* container may not be sized yet */ }
 
             // Static placeholder text so we can confirm the terminal is rendering
             // correctly before wiring it to the WebSocket in the next step.
             term.write("Terminal ready.\r\n");
             term.write("Sign in to the CSCI server and click Run to begin.\r\n");
 
-            // Store the terminal instance on window so run() can reach it later.
-            // window is the global object in the browser — anything attached to it
-            // is accessible from any other script on the page.
+            // Store the terminal and fitAddon on window so run()/openShell() can
+            // read the current cols/rows and send them to the server for PTY sizing.
             window.sshTerminal = term;
+            window.sshFitAddon = fitAddon;
 
-            // When the golden-layout panel is resized, resize the terminal to match.
-            // Without this, the terminal stays its original size even if the panel grows.
+            // When the golden-layout panel is resized, re-fit the terminal.
             container.on("resize", function () {
-                const cols = Math.max(10, Math.floor(container.width / 8));
-                const rows = Math.max(5, Math.floor(container.height / 17));
-                try { term.resize(cols, rows); } catch (e) { /* ignore during init */ }
+                try { fitAddon.fit(); } catch (e) { /* ignore during init */ }
             });
         });
 
