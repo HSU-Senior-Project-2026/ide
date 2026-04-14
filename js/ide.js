@@ -376,7 +376,9 @@ function startRunWebSocket(token, languageId) {
     term.clear();
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=run&lang=${languageId}`;
+    const cols = term.cols || 80;
+    const rows = term.rows || 24;
+    const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=run&lang=${languageId}&cols=${cols}&rows=${rows}`;
 
     const ws = new WebSocket(wsUrl);
     activeTerminalWS = ws;
@@ -391,12 +393,22 @@ function startRunWebSocket(token, languageId) {
         }
     });
 
+    // When the terminal is resized while a program is running, notify the
+    // server so it can resize the PTY to match. Without this, line wrapping
+    // and cursor positioning break after a panel resize.
+    const resizeDisposable = term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "resize", cols, rows }));
+        }
+    });
+
     ws.onopen = () => {
         $statusLine.html("Running...");
     };
 
     ws.onclose = () => {
         dataDisposable.dispose();
+        resizeDisposable.dispose();
         activeTerminalWS = null;
         $runBtn.removeClass("loading");
         $statusLine.html("Program finished.");
@@ -472,7 +484,9 @@ function openShell() {
     $statusLine.html("Opening shell...");
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=shell`;
+    const cols = term.cols || 80;
+    const rows = term.rows || 24;
+    const wsUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=shell&cols=${cols}&rows=${rows}`;
 
     const ws = new WebSocket(wsUrl);
     activeTerminalWS = ws;
@@ -487,12 +501,20 @@ function openShell() {
         }
     });
 
+    // Keep the server PTY in sync when the panel is resized mid-session.
+    const resizeDisposable = term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "resize", cols, rows }));
+        }
+    });
+
     ws.onopen = () => {
         $statusLine.html("Shell connected.");
     };
 
     ws.onclose = () => {
         dataDisposable.dispose();
+        resizeDisposable.dispose();
         activeTerminalWS = null;
         $statusLine.html("Shell disconnected.");
     };
