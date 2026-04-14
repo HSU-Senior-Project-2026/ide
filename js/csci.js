@@ -189,7 +189,7 @@ function renderFileExplorer(entries, currentPath) {
 
   entries.forEach((entry) => {
     const item = document.createElement("div");
-    item.className = "file-explorer-item";
+    item.className = "file-item";
     item.style.display = "flex";
     item.style.justifyContent = "space-between";
     item.style.alignItems = "center";
@@ -212,24 +212,23 @@ function renderFileExplorer(entries, currentPath) {
     });
 
     const actions = document.createElement("div");
+    actions.className = "file-actions";
     actions.style.display = "flex";
     actions.style.gap = "6px";
     actions.style.marginLeft = "8px";
 
-    const renameBtn = document.createElement("button");
-    renameBtn.textContent = "Rename";
-    renameBtn.className = "sidebar-action-btn";
-    renameBtn.style.fontSize = "11px";
+    const renameBtn = document.createElement("i");
+    renameBtn.className = "edit icon rename-btn";
+    renameBtn.title = "Rename";
 
     renameBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       showInlineRenameInput(entry, currentPath);
     });
 
-    const deleteBtn = document.createElement("button");
-    deleteBtn.textContent = "Delete";
-    deleteBtn.className = "sidebar-action-btn";
-    deleteBtn.style.fontSize = "11px";
+    const deleteBtn = document.createElement("i");
+    deleteBtn.className = "trash icon delete-btn";
+    deleteBtn.title = "Delete";
 
     deleteBtn.addEventListener("click", (event) => {
       event.stopPropagation();

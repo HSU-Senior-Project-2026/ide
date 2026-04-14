@@ -442,14 +442,23 @@ body.light-theme .sidebar-placeholder { color: #999999; }
   flex-direction: column;
 }
 
-.file-explorer-item {
+.file-item {
   padding: 6px 10px;
   cursor: pointer;
   color: white;
   font-size: 14px;
 }
 
-.file-explorer-item:hover {
+.file-item:hover {
   background-color: rgba(255, 255, 255, 0.08);
+}
+
+.file-actions {
+  opacity: 0;                     /* hidden initially */
+  transition: opacity 0.2s ease;  /* smooth fade in */
+}
+
+.file-item:hover .file-actions {
+  opacity: 1;                     /* show on hover */
 }
 
