@@ -444,7 +444,7 @@ body.light-theme .lm_title input.tab-rename-input {
     flex-shrink: 0;
 }
 
-.font-size-buttons .font-btn {
+/*.font-size-buttons .font-btn {
     font-family: 'JetBrains Mono', 'Consolas', monospace;
     font-weight: 700;
     font-size: 13px;
@@ -478,6 +478,39 @@ body.light-theme .font-size-buttons .font-btn-increase { background: #2563eb; }
 body.light-theme .font-size-buttons .font-btn-increase:hover { background: #1d4ed8; }
 body.light-theme .font-size-buttons .font-btn-decrease { background: #60a5fa; }
 body.light-theme .font-size-buttons .font-btn-decrease:hover { background: #3b82f6; }
+*/
+
+
+.font-size-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.font-btn {
+  background: none;
+  border: none;
+  color: #9ca3af;          /* soft gray like VIM */
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 2px 4px;
+
+  opacity: 0.7;
+  transition: all 0.2s ease;
+}
+
+/* hover effect */
+.font-btn:hover {
+  color: #ffffff;
+  opacity: 1;
+}
+
+/* click effect */
+.font-btn:active {
+  transform: scale(0.95);
+}
+
 
 /* ===== Responsive top navigation ===== */
 #judge0-site-navigation {
@@ -577,3 +610,4 @@ body.light-theme .font-size-buttons .font-btn-decrease:hover { background: #3b82
 .file-actions i:hover {
   color: #fff;        /* bright white when hovering icon */
 }
+
