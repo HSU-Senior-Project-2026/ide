@@ -593,7 +593,233 @@ function openFile(content, filename) {
     window.hasUnsavedChanges = false;            // freshly loaded file = clean
     window.updateSourceTabTitle();               // ensure correct title
 }
-window.openFile = openFile; // Expose globally for file explorer callbacks  
+window.openFile = openFile; // Expose globally for file explorer callbacks
+
+// Opens a remote (server) file in its own Golden Layout tab, or focuses the
+// existing tab if the file is already open. Each remote tab is identified by
+// its absolute server path so the same file can't appear twice.
+function openFileInTab(filePath, fileName, content) {
+    if (!layout || !layout.root) {
+        // Layout not ready yet — fall back to single-editor behavior
+        openFile(content, fileName);
+        window.currentOpenFilePath = filePath;
+        window.currentOpenFileName = fileName;
+        return;
+    }
+
+    const tabId = "remote:" + filePath;
+
+    // If already open, just focus that tab
+    const existing = layout.root.getItemsById(tabId)[0];
+    if (existing) {
+        if (existing.parent && existing.parent.setActiveContentItem) {
+            existing.parent.setActiveContentItem(existing);
+        }
+        // If content has drifted on disk and there are no unsaved edits,
+        // refresh — otherwise leave the user's work intact.
+        try {
+            const editorForTab = (window.sourceEditorsByPath || {})[filePath];
+            if (editorForTab && editorForTab.editor && !window.hasUnsavedChanges) {
+                if (editorForTab.editor.getValue() !== content) {
+                    window.suppressDirty = true;
+                    editorForTab.editor.setValue(content);
+                    window.suppressDirty = false;
+                }
+            }
+        } catch (e) {}
+        return;
+    }
+
+    const sourceStack = layout.root.getItemsById("sourceStack")[0];
+    if (!sourceStack) {
+        openFile(content, fileName);
+        window.currentOpenFilePath = filePath;
+        window.currentOpenFileName = fileName;
+        return;
+    }
+
+    sourceStack.addChild({
+        type: "component",
+        componentName: "source",
+        id: tabId,
+        title: fileName,
+        componentState: {
+            readOnly: false,
+            filePath: filePath,
+            fileName: fileName,
+            initialContent: content
+        }
+    });
+}
+window.openFileInTab = openFileInTab;
+
+// Closes a remote tab by its server path (used when the file is deleted).
+function closeRemoteTabByPath(filePath) {
+    if (!layout || !layout.root) return;
+    const item = layout.root.getItemsById("remote:" + filePath)[0];
+    if (item) {
+        try { item.remove(); } catch (e) {}
+    }
+}
+window.closeRemoteTabByPath = closeRemoteTabByPath;
+
+// Updates an open remote tab when the file is renamed elsewhere (e.g. from
+// the file-tree rename flow). Changes the tab id/title/state to the new path.
+function renameRemoteTabByPath(oldPath, newPath, newName) {
+    if (!layout || !layout.root) return;
+    const item = layout.root.getItemsById("remote:" + oldPath)[0];
+    if (!item) return;
+
+    const cfg = item.config;
+    cfg.id = "remote:" + newPath;
+    cfg.title = newName;
+    cfg.componentState = cfg.componentState || {};
+    cfg.componentState.filePath = newPath;
+    cfg.componentState.fileName = newName;
+
+    try { item.setTitle(newName); } catch (e) {}
+
+    // Update the per-path editor map
+    if (window.sourceEditorsByPath && window.sourceEditorsByPath[oldPath]) {
+        window.sourceEditorsByPath[newPath] = window.sourceEditorsByPath[oldPath];
+        delete window.sourceEditorsByPath[oldPath];
+    }
+
+    // If this is the active tab, re-sync globals and language detection
+    if (window.currentOpenFilePath === oldPath) {
+        window.currentOpenFilePath = newPath;
+        window.currentOpenFileName = newName;
+        window.currentFileName = newName;
+        try { selectLanguageForExtension(newName.split(".").pop()); } catch (e) {}
+        if (typeof window.updateSourceTabTitle === "function") {
+            window.updateSourceTabTitle();
+        }
+    }
+}
+window.renameRemoteTabByPath = renameRemoteTabByPath;
+
+// Double-click on a source tab's title triggers rename via ssh-mv.
+// Only attaches once per page load; delegates from document.
+let _sourceTabDblClickWired = false;
+function setupSourceTabInteractions() {
+    if (_sourceTabDblClickWired) return;
+    _sourceTabDblClickWired = true;
+
+    $(document).on("dblclick", ".lm_header .lm_tab .lm_title", function (e) {
+        if (!layout || !layout.root) return;
+        const sourceStack = layout.root.getItemsById("sourceStack")[0];
+        if (!sourceStack) return;
+
+        // Find which stack this tab belongs to via DOM walk
+        const tabEl = $(this).closest(".lm_tab")[0];
+        const stackEl = $(tabEl).closest(".lm_stack")[0];
+        if (!stackEl || sourceStack.element[0] !== stackEl) return;
+
+        // Map DOM tab element to the GL content item
+        const tabObj = (sourceStack.header && sourceStack.header.tabs || [])
+            .find(t => t.element && t.element[0] === tabEl);
+        const item = tabObj ? tabObj.contentItem : null;
+        if (!item) return;
+
+        const state = (item.config && item.config.componentState) || {};
+        if (!state.filePath) return; // scratch tab isn't renamable this way
+
+        e.preventDefault();
+        e.stopPropagation();
+        beginInlineTabRename(this, state.filePath, state.fileName || item.config.title);
+    });
+}
+
+// Replaces the tab title with an inline <input>, lets the user edit the name
+// directly, and submits the rename via /ssh-mv on Enter/blur. Escape cancels.
+function beginInlineTabRename(titleEl, oldPath, oldName) {
+    const $title = $(titleEl);
+    if ($title.find("input.tab-rename-input").length) return; // already editing
+
+    const originalText = $title.text();
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "tab-rename-input";
+    input.value = oldName;
+    input.spellcheck = false;
+    input.autocomplete = "off";
+
+    $title.empty().append(input);
+    input.focus();
+    // Select the basename (everything before the final dot) for quick editing
+    const dot = oldName.lastIndexOf(".");
+    if (dot > 0) input.setSelectionRange(0, dot);
+    else input.select();
+
+    let finished = false;
+
+    function restoreTitle(text) {
+        $title.empty().text(text);
+    }
+
+    function cancel() {
+        if (finished) return;
+        finished = true;
+        restoreTitle(originalText);
+    }
+
+    function submit() {
+        if (finished) return;
+        const newName = input.value.trim();
+        if (!newName || newName === oldName) {
+            cancel();
+            return;
+        }
+        finished = true;
+
+        const token = window.sshToken || window.csciSessionToken;
+        if (!token) {
+            restoreTitle(originalText);
+            showError("Error", "Please sign in to the CSCI server before renaming.");
+            return;
+        }
+
+        const basePath = oldPath.substring(0, oldPath.lastIndexOf("/"));
+        const newPath = basePath + "/" + newName;
+
+        // Optimistic title update so the UI feels snappy
+        restoreTitle(newName);
+
+        fetch("/ssh-mv", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: token, from: oldPath, to: newPath })
+        })
+        .then(r => r.json())
+        .then(result => {
+            if (!result.success) {
+                restoreTitle(originalText);
+                showError("Rename failed", result.error || "Unknown error");
+                return;
+            }
+            renameRemoteTabByPath(result.from || oldPath, result.to || newPath, newName);
+            if (typeof window.loadFileExplorer === "function" && window.currentExplorerPath) {
+                window.loadFileExplorer(window.currentExplorerPath);
+            }
+        })
+        .catch(err => {
+            restoreTitle(originalText);
+            showError("Error", "Rename failed: " + err.message);
+        });
+    }
+
+    input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); submit(); }
+        else if (ev.key === "Escape") { ev.preventDefault(); cancel(); }
+        ev.stopPropagation();
+    });
+    // Stop the parent tab from interpreting clicks/drags as tab switches/drags
+    input.addEventListener("mousedown", (ev) => ev.stopPropagation());
+    input.addEventListener("click", (ev) => ev.stopPropagation());
+    input.addEventListener("blur", () => submit());
+}
+
 
 function saveNow(reason) {
   if (!sourceEditor) return;
@@ -923,12 +1149,25 @@ document.addEventListener("DOMContentLoaded", async function () {
 
             // Set initial content if parsed dynamically via file_explorer open callbacks
             if (state.initialContent !== undefined) {
+                window.suppressDirty = true;
                 editor.setValue(state.initialContent);
+                window.suppressDirty = false;
             }
 
+            // A tab backed by a remote server file carries its full path in state.
+            // These tabs don't participate in the local FileManager (workspace) tree.
+            const remotePath = state.filePath || null;
+            const remoteName = state.fileName || null;
             let fileId = state.fileId;
-            if (!fileId) {
-                // If it is the default first tab generated implicitly by Golden Layout's config tree
+
+            if (remotePath) {
+                container.setTitle(remoteName);
+                try { selectLanguageForExtension(remoteName.split(".").pop()); } catch(e) {}
+                window.sourceEditorsByPath = window.sourceEditorsByPath || {};
+                window.sourceEditorsByPath[remotePath] = { editor: editor, container: container };
+                fileId = "remote:" + remotePath;
+            } else if (!fileId) {
+                // Default first tab generated implicitly by Golden Layout's config tree
                 let initialFile = FileManager.getInitialFileContent();
                 if (initialFile) {
                     fileId = initialFile.id;
@@ -949,23 +1188,44 @@ document.addEventListener("DOMContentLoaded", async function () {
             container.on("show", () => {
                 sourceEditor = editor;
                 sourceContainer = container;
+                window.sourceEditor = editor;
+                window.sourceContainer = container;
 
-                // Get the canonical file name from the VFS
-                let vfsFile = FileManager.findFile(fileId, FileManager.tree);
-                if (vfsFile) {
-                    currentFileName = vfsFile.name;
+                // Read the remote path from current state (may have changed after rename)
+                const curRemotePath = (container._config.componentState || {}).filePath;
+                const curRemoteName = (container._config.componentState || {}).fileName;
+
+                if (curRemotePath) {
+                    // Remote-backed tab: drive the server-save state off this tab.
+                    window.currentFileName = curRemoteName || container._config.title;
+                    window.currentOpenFilePath = curRemotePath;
+                    window.currentOpenFileName = window.currentFileName;
+                    selectLanguageForExtension(window.currentFileName.split(".").pop());
+                    if (typeof window.updateSourceTabTitle === "function") {
+                        window.updateSourceTabTitle();
+                    }
                 } else {
-                    currentFileName = container._config.title;
-                }
-                selectLanguageForExtension(currentFileName.split(".").pop());
+                    // Local workspace tab.
+                    let vfsFile = FileManager.findFile(fileId, FileManager.tree);
+                    if (vfsFile) {
+                        currentFileName = vfsFile.name;
+                    } else {
+                        currentFileName = container._config.title;
+                    }
+                    selectLanguageForExtension(currentFileName.split(".").pop());
 
-                // Sync sidebar selection
-                FileManager.activeFileId = fileId;
-                let parentId = FileManager.findParentFolderId(fileId, FileManager.tree);
-                if (parentId) {
-                    FileManager.activeFolderId = parentId;
+                    // Clear remote-save pointers so Ctrl+S on a local scratch tab
+                    // doesn't write to the last-opened remote file.
+                    window.currentOpenFilePath = null;
+                    window.currentOpenFileName = null;
+
+                    FileManager.activeFileId = fileId;
+                    let parentId = FileManager.findParentFolderId(fileId, FileManager.tree);
+                    if (parentId) {
+                        FileManager.activeFolderId = parentId;
+                    }
+                    FileManager.render();
                 }
-                FileManager.render();
 
                 // Reattach vim to the newly active editor
                 try {
@@ -974,14 +1234,19 @@ document.addEventListener("DOMContentLoaded", async function () {
             });
 
             container.on("destroy", () => {
-                // Save content before disposing
-                try {
-                    let file = FileManager.findFile(fileId, FileManager.tree);
-                    if (file) {
-                        file.content = editor.getValue();
-                        FileManager.saveWorkspace();
-                    }
-                } catch (e) {}
+                const st = container._config.componentState || {};
+                if (st.filePath && window.sourceEditorsByPath) {
+                    delete window.sourceEditorsByPath[st.filePath];
+                } else {
+                    // Save content of local workspace tabs before disposing
+                    try {
+                        let file = FileManager.findFile(fileId, FileManager.tree);
+                        if (file) {
+                            file.content = editor.getValue();
+                            FileManager.saveWorkspace();
+                        }
+                    } catch (e) {}
+                }
                 try {
                     if (window.__vimHelpers) window.__vimHelpers.detach();
                 } catch(e) {}
@@ -1155,6 +1420,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         });
 
         layout.on("initialised", function () {
+            setupSourceTabInteractions();
             FileManager.init({
                 onOpenFile: (content, name) => {
                     openFile(content, name);
@@ -1448,3 +1714,17 @@ const EXTENSIONS_TABLE = {
 function getLanguageForExtension(extension) {
     return EXTENSIONS_TABLE[extension] || null;
 }
+
+window.increaseFont = function () {
+    if (fontSize < 32) {
+        fontSize += 2;
+        setFontSizeForAllEditors(fontSize);
+    }
+};
+
+window.decreaseFont = function () {
+    if (fontSize > 8) {
+        fontSize -= 2;
+        setFontSizeForAllEditors(fontSize);
+    }
+};

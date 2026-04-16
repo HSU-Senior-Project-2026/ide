@@ -283,17 +283,14 @@ async function deleteExplorerItem(entry, currentPath) {
             return;
         }
 
-        // If the currently open file was deleted, clear editor state
-        if (window.currentOpenFilePath === result.path) {
-            if (window.sourceEditor) {
-                window.suppressDirty = true;
-                window.sourceEditor.setValue("");
-                window.suppressDirty = false;
-            }
+        // If a tab is open for the deleted file, close it.
+        if (typeof window.closeRemoteTabByPath === "function") {
+            window.closeRemoteTabByPath(result.path);
+        }
 
+        if (window.currentOpenFilePath === result.path) {
             window.currentOpenFilePath = null;
             window.currentOpenFileName = null;
-            window.currentFileName = "Main.java";
             window.hasUnsavedChanges = false;
 
             if (typeof window.updateSourceTabTitle === "function") {
@@ -341,10 +338,17 @@ async function openServerFile(filePath, fileName) {
       return;
     }
 
-    // Load file contents into the editor
-    window.openFile(result.content, fileName);
+    // Open (or focus) a dedicated Golden Layout tab for this file so multiple
+    // files can stay open at once. openFileInTab handles deduping by path.
+    if (typeof window.openFileInTab === "function") {
+        window.openFileInTab(result.path, fileName, result.content);
+    } else {
+        window.openFile(result.content, fileName);
+    }
 
-    // Remember which file is currently open
+    // Remember which file is currently open (used by the Save button).
+    // The tab's "show" handler also sets these, but set them here in case
+    // the tab is already focused and show() doesn't re-fire.
     window.currentOpenFilePath = result.path;
     window.currentOpenFileName = fileName;
 
@@ -752,18 +756,15 @@ async function showInlineRenameInput(entry, currentPath) {
                 return;
             }
 
-            // If the currently open file was renamed, keep tracking the new path/name
-            if (window.currentOpenFilePath === result.from) {
+            // Update the open Golden Layout tab for this file (if any) so its
+            // id/title/state all reflect the new path.
+            if (typeof window.renameRemoteTabByPath === "function") {
+                window.renameRemoteTabByPath(result.from || oldPath, result.to || newPath, newName);
+            } else if (window.currentOpenFilePath === result.from) {
                 window.currentOpenFilePath = result.to;
                 window.currentOpenFileName = newName;
-
                 if (typeof window.setSourceCodeName === "function") {
                     window.setSourceCodeName(newName);
-                } else {
-                    window.currentFileName = newName;
-                    if (typeof window.updateSourceTabTitle === "function") {
-                        window.updateSourceTabTitle();
-                    }
                 }
             }
 
