@@ -1095,13 +1095,13 @@ document.addEventListener("DOMContentLoaded", async function () {
                     enabled: true
                 },
 
-                autoIndent: "full",
+                autoIndent: "none",
                 formatOnType: true,
                 formatOnPaste: true,
 
-                autoClosingBrackets: "always",
-                autoClosingQuotes: "always",
-                autoSurround: "languageDefined",
+                autoClosingBrackets: "never",
+                autoClosingQuotes: "never",
+                autoSurround: "never",
 
                 glyphMargin: true,
 
