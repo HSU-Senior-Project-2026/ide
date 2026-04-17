@@ -490,13 +490,13 @@ body.light-theme .font-size-buttons .font-btn-decrease:hover { background: #3b82
 .font-btn {
   background: none;
   border: none;
-  color: #9ca3af;          /* soft gray like VIM */
+  color: #303234;          /* soft gray like VIM */
   font-size: 13px;
-  font-weight: 500;
+  font-weight: bold;
   cursor: pointer;
   padding: 2px 4px;
 
-  opacity: 0.7;
+  opacity: 0.4;
   transition: all 0.2s ease;
 }
 
@@ -611,3 +611,7 @@ body.light-theme .font-size-buttons .font-btn-decrease:hover { background: #3b82
   color: #fff;        /* bright white when hovering icon */
 }
 
+body.light-theme #file-explorer-list .file-item,
+body.light-theme #file-explorer-list .file-item span {
+  color: #222 !important;
+}
