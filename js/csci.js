@@ -49,13 +49,124 @@ function showNotification(message, type) {
   }, 3000);
 }
 
-async function showSignInModal() {
+// ===== Sign-in modal helpers =====
+
+function showSignInModal() {
+  clearSignInError();
   $('#judge0-csci-sign-in-modal')
     .modal({ closable: false }).modal('show');
 }
 
-async function hideSignInModal() {
+function hideSignInModal() {
   $('#judge0-csci-sign-in-modal').modal('hide');
+}
+
+// Sets the shared signed-in state across ide.js + csci.js and updates the nav UI.
+function applySignedInUI(username, token) {
+  window.csciSessionToken = token;
+  window.sshToken = token;
+
+  var displayName = (username || "").split("@")[0] || "User";
+  document.getElementById("judge0-account-label").textContent = displayName;
+  document.getElementById("judge0-csci-sign-in-btn").style.display = "none";
+  document.getElementById("judge0-csci-sign-out-btn").style.display = "";
+
+  window.dispatchEvent(new Event("csci-signed-in"));
+}
+
+// Show / clear the error message inside the sign-in modal.
+function showSignInError(msg) {
+  var el = document.getElementById("sign-in-error-msg");
+  if (el) {
+    el.textContent = msg;
+    el.style.display = "";
+  }
+}
+
+function clearSignInError() {
+  var el = document.getElementById("sign-in-error-msg");
+  if (el) {
+    el.textContent = "";
+    el.style.display = "none";
+  }
+  stopLockoutCountdown();
+}
+
+// Countdown timer shown in the modal when the user is locked out.
+var _lockoutInterval = null;
+
+function startLockoutCountdown(remainMs) {
+  stopLockoutCountdown();
+
+  var endTime = Date.now() + remainMs;
+  var btn = document.getElementById("judge0-csci-modal-sign-in-btn");
+  var timerEl = document.getElementById("sign-in-lockout-timer");
+
+  if (btn) btn.classList.add("disabled");
+
+  function tick() {
+    var left = Math.max(0, endTime - Date.now());
+    if (left <= 0) {
+      stopLockoutCountdown();
+      return;
+    }
+    var m = Math.floor(left / 60000);
+    var s = Math.ceil((left % 60000) / 1000);
+    if (s === 60) { m += 1; s = 0; }
+    var display = m + ":" + (s < 10 ? "0" : "") + s;
+    if (timerEl) {
+      timerEl.textContent = "Try again in " + display;
+      timerEl.style.display = "";
+    }
+  }
+
+  tick();
+  _lockoutInterval = setInterval(tick, 1000);
+}
+
+function stopLockoutCountdown() {
+  if (_lockoutInterval) {
+    clearInterval(_lockoutInterval);
+    _lockoutInterval = null;
+  }
+  var btn = document.getElementById("judge0-csci-modal-sign-in-btn");
+  if (btn) btn.classList.remove("disabled");
+  var timerEl = document.getElementById("sign-in-lockout-timer");
+  if (timerEl) { timerEl.textContent = ""; timerEl.style.display = "none"; }
+}
+
+// Try to restore a previous session from sessionStorage (survives page refresh).
+async function tryRestoreSession() {
+  var token, username;
+  try {
+    token = sessionStorage.getItem("csci.token");
+    username = sessionStorage.getItem("csci.username");
+  } catch (_) {}
+
+  if (!token || !username) return false;
+
+  try {
+    var response = await fetch("/ssh-validate-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: token })
+    });
+    var result = await response.json();
+    if (result.success) {
+      applySignedInUI(result.username || username, token);
+      loadFileExplorer("~");
+      return true;
+    }
+  } catch (err) {
+    console.warn("Session restore failed:", err);
+  }
+
+  // Token expired or invalid — clear storage
+  try {
+    sessionStorage.removeItem("csci.token");
+    sessionStorage.removeItem("csci.username");
+  } catch (_) {}
+  return false;
 }
 
 async function signIn(e) {
@@ -78,30 +189,31 @@ async function signIn(e) {
     const result = await response.json();
 
     if (result.success) {
-      // Clear credentials from DOM immediately after successful login
       passwordInput.value = "";
       $('#judge0-csci-sign-in-modal').modal('hide');
+      clearSignInError();
       showNotification(`Connected to CSCI server as ${username}`, "success");
-      // Update account dropdown to show signed-in state
-      var displayName = username.split("@")[0] || "User";
-      document.getElementById("judge0-account-label").textContent = displayName;
-      document.getElementById("judge0-csci-sign-in-btn").style.display = "none";
-      document.getElementById("judge0-csci-sign-out-btn").style.display = "";
 
-      // Save the SSH session token returned by the backend.
-      // window.csciSessionToken is used by ide.js (run, compile, shell).
-      // window.sshToken is used by file explorer operations (ssh-ls, ssh-read, etc).
-      // Both must point to the same token.
-      window.csciSessionToken = result.token;
-      window.sshToken = result.token;
+      applySignedInUI(username, result.token);
 
-      // Tell ide.js to auto-open the persistent shell.
-      window.dispatchEvent(new Event("csci-signed-in"));
+      // Persist session so a page reload doesn't force re-auth
+      try {
+        sessionStorage.setItem("csci.token", result.token);
+        sessionStorage.setItem("csci.username", username);
+      } catch (_) {}
 
       loadFileExplorer("~");
 
     } else {
-      showNotification("Login failed: " + result.error, "error");
+      // Show attempts remaining / lockout info inside the modal
+      let msg = result.error || "Login failed.";
+      if (result.attemptsLeft !== undefined && result.attemptsLeft > 0) {
+        msg += ` (${result.attemptsLeft} attempt${result.attemptsLeft === 1 ? "" : "s"} remaining)`;
+      }
+      if (result.retryAfterMs) {
+        startLockoutCountdown(result.retryAfterMs);
+      }
+      showSignInError(msg);
     }
   } catch (err) {
     console.error("Fetch error:", err);
@@ -147,6 +259,15 @@ async function signOut() {
     document.getElementById("judge0-account-label").textContent = "Account";
     document.getElementById("judge0-csci-sign-in-btn").style.display = "";
     document.getElementById("judge0-csci-sign-out-btn").style.display = "none";
+
+    // Clear persisted session
+    try {
+      sessionStorage.removeItem("csci.token");
+      sessionStorage.removeItem("csci.username");
+    } catch (_) {}
+
+    // Re-show the sign-in modal since nothing works without auth
+    showSignInModal();
   }
 }
 
@@ -608,23 +729,20 @@ async function openServerFile(filePath, fileName) {
   window.addEventListener("beforeunload", beaconSignOut);
 });*/
 
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", async function () {
   document
     .getElementById("judge0-csci-sign-in-btn")
     .addEventListener("click", showSignInModal);
 
   const signInForm = document.getElementById("judge0-csci-sign-in-form");
   const signInBtn = document.getElementById("judge0-csci-modal-sign-in-btn");
-  const cancelBtn = document.getElementById("judge0-csci-modal-sign-in-cancel-btn");
   const signOutBtn = document.getElementById("judge0-csci-sign-out-btn");
 
-  // Keep normal form submission from reloading the page
   signInForm?.addEventListener("submit", function (e) {
     e.preventDefault();
     signIn(e);
   });
 
-  // Force Enter key to trigger sign-in from anywhere inside the modal form
   signInForm?.addEventListener("keydown", function (e) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -633,35 +751,16 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 
   signInBtn?.addEventListener("click", signIn);
-  cancelBtn?.addEventListener("click", hideSignInModal);
   signOutBtn?.addEventListener("click", signOut);
 
-  function beaconSignOut() {
-    if (!window.csciSessionToken) return;
-    try {
-      const payload = new Blob(
-        [JSON.stringify({ token: window.csciSessionToken })],
-        { type: "application/json" }
-      );
-      navigator.sendBeacon("/ssh-sign-out", payload);
-    } catch (err) {
-      console.warn("sendBeacon sign-out failed:", err);
-    }
-  }
-
-  window.addEventListener("pagehide", beaconSignOut);
-  window.addEventListener("beforeunload", beaconSignOut);
-});
-
-
-// Attach saveCurrentFile to the Save button in the UI
-document.getElementById("save-file-btn")?.addEventListener("click", () => {
-  if (typeof window.saveCurrentFile === "function") {
-    window.saveCurrentFile();
-  } else {
-    console.error("saveCurrentFile is not available.");
+  // Try to restore a session saved from before the reload.
+  // If it works, skip the sign-in modal entirely.
+  const restored = await tryRestoreSession();
+  if (!restored) {
+    showSignInModal();
   }
 });
+
 
 // Attach saveCurrentFile to the Save button in the UI
 document.getElementById("save-file-btn")?.addEventListener("click", () => {
