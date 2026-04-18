@@ -153,7 +153,9 @@ async function signOut() {
 // Load files from the user's home directory and render them in the Explorer
 async function loadFileExplorer(path = "~") {
   console.log("loadFileExplorer called with path:", path);
+  window.currentDirectory = path;
   window.currentExplorerPath = path;  // Track current path for navigation and new file creation
+  
   if (!window.sshToken) {
     console.error("No SSH token found.");
     return;
@@ -175,6 +177,10 @@ async function loadFileExplorer(path = "~") {
 
     const result = await response.json();
     console.log("ssh-ls result:", result);
+
+    if (result.success && result.path) {
+      window.currentDirectory = result.path;
+    }
 
     if (!result.success) {
       console.error("Failed to load files:", result.error);
@@ -203,10 +209,23 @@ function renderFileExplorer(entries, currentPath) {
     item.style.display = "flex";
     item.style.justifyContent = "space-between";
     item.style.alignItems = "center";
+    if (entry.type === "directory") {
+      item.classList.add("folder-item");
+    } else {
+      item.classList.add("file-entry");
+  }
 
     const label = document.createElement("span");
-    label.textContent = entry.type === "directory" ? `📁 ${entry.name}` : `📄 ${entry.name}`;
+    label.className = "file-label";
+    label.innerHTML = entry.type === "directory"
+      ? `<i class="folder icon"></i>${entry.name}`
+      : `<i class="file outline icon"></i>${entry.name}`;
     label.style.flex = "1";
+    label.style.display = "flex";
+    label.style.alignItems = "center";
+    label.style.gap = "8px";
+    label.style.cursor = "pointer";
+    label.style.minWidth = "0";
 
     label.addEventListener("click", () => {
       if (entry.type === "directory") {
@@ -217,6 +236,11 @@ function renderFileExplorer(entries, currentPath) {
         loadFileExplorer(nextPath);
       } else {
         const filePath = `${currentPath}/${entry.name}`;
+        document.querySelectorAll(".file-item").forEach(el => {
+          el.classList.remove("active-file");
+        });
+        item.classList.add("active-file");
+        
         openServerFile(filePath, entry.name);
       }
     });
@@ -253,6 +277,7 @@ function renderFileExplorer(entries, currentPath) {
     container.appendChild(item);
   });
 }
+
 // Delete a file or empty folder from the Explorer
 async function deleteExplorerItem(entry, currentPath) {
     if (!window.sshToken) {
@@ -583,6 +608,80 @@ document.getElementById("sidebar-new-folder")?.addEventListener("click", () => {
     showInlineNewItemInput("folder");
 });
 
+async function saveCurrentFileAs() {
+  if (!window.sshToken) {
+    console.error("No SSH token found.");
+    return;
+  }
+
+  if (!window.sourceEditor) {
+    console.error("Editor not initialized.");
+    return;
+  }
+
+  const currentPath = window.currentOpenFilePath || "";
+  const currentName = window.currentOpenFileName || "Main.java";
+  const newFileName = prompt("Save file as:", currentName);
+
+  if (!newFileName) return;
+
+  const trimmedName = newFileName.trim();
+  if (!trimmedName) return;
+
+  const parentDir = window.currentOpenFilePath
+  ? getParentDirectory(window.currentOpenFilePath)
+  : window.currentDirectory || "";
+  const newPath = parentDir ? `${parentDir}/${trimmedName}` : trimmedName;
+  const content = window.sourceEditor.getValue();
+
+  try {
+    const response = await fetch("/ssh-write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: window.sshToken,
+        path: newPath,
+        content
+      })
+    });
+
+    const result = await response.json();
+    console.log("Save As result:", result);
+
+    if (!result.success) {
+      console.error("Failed to save file as:", result.error);
+      return;
+    }
+
+    window.currentOpenFilePath = newPath;
+    window.currentOpenFileName = trimmedName;
+    window.hasUnsavedChanges = false;
+
+    if (typeof loadFileExplorer === "function") {
+      await loadFileExplorer(window.currentDirectory || window.currentExplorerPath || "~");
+    }
+
+    /*if (typeof window.setSourceCodeName === "function") {
+      window.setSourceCodeName(trimmedName);
+    }*/
+
+    /*if (typeof window.updateSourceTabTitle === "function") {
+      window.updateSourceTabTitle();
+    }*/
+
+    if (typeof openServerFile === "function") {
+      await openServerFile(newPath, trimmedName);
+    }
+
+    console.log(`Saved file as: ${newPath}`);
+  } catch (err) {
+    console.error("Error saving file as:", err);
+  }
+
+}
+
+window.saveCurrentFileAs = saveCurrentFileAs;
+
 function showInlineNewItemInput(type) {
     const container = document.getElementById("file-explorer-list");
     if (!container) {
@@ -797,4 +896,10 @@ async function showInlineRenameInput(entry, currentPath) {
             }
         }, 100);
     });
+}
+
+function getParentDirectory(filePath) {
+  if (!filePath) return "";
+  const lastSlash = filePath.lastIndexOf("/");
+  return lastSlash !== -1 ? filePath.substring(0, lastSlash) : "";
 }
