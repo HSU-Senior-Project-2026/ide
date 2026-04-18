@@ -202,7 +202,14 @@ function renderFileExplorer(entries, currentPath) {
   }
 
   container.innerHTML = "";
+  entries.sort((a, b) => {
+  // folders first
+    if (a.type === "directory" && b.type !== "directory") return -1;
+    if (a.type !== "directory" && b.type === "directory") return 1;
 
+  // then alphabetical
+    return a.name.localeCompare(b.name);
+  });
   entries.forEach((entry) => {
     const item = document.createElement("div");
     item.className = "file-item";
