@@ -286,7 +286,12 @@ function entriesToNodes(entries, parentPath) {
       path: parentPath + "/" + e.name,
       children: e.type === "directory" ? null : undefined,
       expanded: false
-    }));
+    }))
+    .sort((a, b) => {
+      if (a.type === "directory" && b.type !== "directory") return -1;
+      if (a.type !== "directory" && b.type === "directory") return 1;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 // Walk the tree to find a node by its absolute path.
@@ -490,10 +495,6 @@ function renderTreeExplorer() {
   const container = document.getElementById("file-explorer-list");
   if (!container || !window.explorerTree) return;
   container.innerHTML = "";
-  entries.sort((a, b) => {
-  // folders first
-    if (a.type === "directory" && b.type !== "directory") return -1;
-    if (a.type !== "directory" && b.type === "directory") return 1;
 
   if (!window.explorerTree.children || window.explorerTree.children.length === 0) {
     const placeholder = document.createElement("div");
@@ -857,6 +858,11 @@ document.getElementById("sidebar-new-folder")?.addEventListener("click", () => {
 
     showInlineNewItemInput("folder");
 });
+
+function getParentDirectory(filePath) {
+  const lastSlash = filePath.lastIndexOf("/");
+  return lastSlash > 0 ? filePath.substring(0, lastSlash) : "";
+}
 
 async function saveCurrentFileAs() {
   if (!window.sshToken) {
