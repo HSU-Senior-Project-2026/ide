@@ -209,10 +209,23 @@ function renderFileExplorer(entries, currentPath) {
     item.style.display = "flex";
     item.style.justifyContent = "space-between";
     item.style.alignItems = "center";
+    if (entry.type === "directory") {
+      item.classList.add("folder-item");
+    } else {
+      item.classList.add("file-entry");
+  }
 
     const label = document.createElement("span");
-    label.textContent = entry.type === "directory" ? `📁 ${entry.name}` : `📄 ${entry.name}`;
+    label.className = "file-label";
+    label.innerHTML = entry.type === "directory"
+      ? `<i class="folder icon"></i>${entry.name}`
+      : `<i class="file outline icon"></i>${entry.name}`;
     label.style.flex = "1";
+    label.style.display = "flex";
+    label.style.alignItems = "center";
+    label.style.gap = "8px";
+    label.style.cursor = "pointer";
+    label.style.minWidth = "0";
 
     label.addEventListener("click", () => {
       if (entry.type === "directory") {
@@ -223,6 +236,11 @@ function renderFileExplorer(entries, currentPath) {
         loadFileExplorer(nextPath);
       } else {
         const filePath = `${currentPath}/${entry.name}`;
+        document.querySelectorAll(".file-item").forEach(el => {
+          el.classList.remove("active-file");
+        });
+        item.classList.add("active-file");
+        
         openServerFile(filePath, entry.name);
       }
     });
@@ -259,6 +277,7 @@ function renderFileExplorer(entries, currentPath) {
     container.appendChild(item);
   });
 }
+
 // Delete a file or empty folder from the Explorer
 async function deleteExplorerItem(entry, currentPath) {
     if (!window.sshToken) {
