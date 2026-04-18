@@ -433,80 +433,38 @@ body.light-theme .lm_title input.tab-rename-input {
 
 /* ===== Font size buttons (A+ / A-) ===== */
 .font-size-buttons {
-    display: inline-flex;
-    align-items: stretch;
-    gap: 0;
-    margin: 0;
-    border-radius: 6px;
-    overflow: hidden;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-    user-select: none;
-    flex-shrink: 0;
-}
-
-/*.font-size-buttons .font-btn {
-    font-family: 'JetBrains Mono', 'Consolas', monospace;
-    font-weight: 700;
-    font-size: 13px;
-    line-height: 1;
-    padding: 0.65em 0.95em;
-    margin: 0;
-    border: none;
-    border-radius: 0;
-    color: #ffffff;
-    cursor: pointer;
-    min-width: 42px;
-    transition: background-color 0.15s ease, transform 0.08s ease;
-    -webkit-appearance: none;
-    appearance: none;
-}
-
-.font-size-buttons .font-btn:focus {
-    outline: none;
-    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
-}
-
-.font-size-buttons .font-btn-increase { background: #3b82f6; }
-.font-size-buttons .font-btn-increase:hover { background: #2563eb; }
-
-.font-size-buttons .font-btn-decrease { background: #60a5fa; }
-.font-size-buttons .font-btn-decrease:hover { background: #3b82f6; }
-
-.font-size-buttons .font-btn:active { transform: scale(0.96); }
-
-body.light-theme .font-size-buttons .font-btn-increase { background: #2563eb; }
-body.light-theme .font-size-buttons .font-btn-increase:hover { background: #1d4ed8; }
-body.light-theme .font-size-buttons .font-btn-decrease { background: #60a5fa; }
-body.light-theme .font-size-buttons .font-btn-decrease:hover { background: #3b82f6; }
-*/
-
-
-.font-size-buttons {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
 .font-btn {
-  background: none;
   border: none;
-  color: #303234;          /* soft gray like VIM */
+  color: #ffffff;
   font-size: 13px;
   font-weight: bold;
   cursor: pointer;
-  padding: 2px 4px;
-
-  opacity: 0.4;
+  padding: 4px 10px;
+  border-radius: 4px;
   transition: all 0.2s ease;
 }
 
-/* hover effect */
-.font-btn:hover {
-  color: #ffffff;
-  opacity: 1;
+.font-btn-increase {
+  background: #4a90d9;
 }
 
-/* click effect */
+.font-btn-increase:hover {
+  background: #5ba0e8;
+}
+
+.font-btn-decrease {
+  background: #2b5f9e;
+}
+
+.font-btn-decrease:hover {
+  background: #3a6fae;
+}
+
 .font-btn:active {
   transform: scale(0.95);
 }
