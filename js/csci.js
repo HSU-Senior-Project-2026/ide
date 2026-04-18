@@ -490,6 +490,10 @@ function renderTreeExplorer() {
   const container = document.getElementById("file-explorer-list");
   if (!container || !window.explorerTree) return;
   container.innerHTML = "";
+  entries.sort((a, b) => {
+  // folders first
+    if (a.type === "directory" && b.type !== "directory") return -1;
+    if (a.type !== "directory" && b.type === "directory") return 1;
 
   if (!window.explorerTree.children || window.explorerTree.children.length === 0) {
     const placeholder = document.createElement("div");
@@ -580,6 +584,7 @@ function beginTreeRename(node, nameSpan) {
   input.addEventListener("click", (e) => e.stopPropagation());
   input.addEventListener("mousedown", (e) => e.stopPropagation());
 }
+
 // Delete a file or empty folder from the Explorer
 async function deleteExplorerItem(entry, currentPath) {
     if (!window.sshToken) {
@@ -852,6 +857,80 @@ document.getElementById("sidebar-new-folder")?.addEventListener("click", () => {
 
     showInlineNewItemInput("folder");
 });
+
+async function saveCurrentFileAs() {
+  if (!window.sshToken) {
+    console.error("No SSH token found.");
+    return;
+  }
+
+  if (!window.sourceEditor) {
+    console.error("Editor not initialized.");
+    return;
+  }
+
+  const currentPath = window.currentOpenFilePath || "";
+  const currentName = window.currentOpenFileName || "Main.java";
+  const newFileName = prompt("Save file as:", currentName);
+
+  if (!newFileName) return;
+
+  const trimmedName = newFileName.trim();
+  if (!trimmedName) return;
+
+  const parentDir = window.currentOpenFilePath
+  ? getParentDirectory(window.currentOpenFilePath)
+  : window.currentDirectory || "";
+  const newPath = parentDir ? `${parentDir}/${trimmedName}` : trimmedName;
+  const content = window.sourceEditor.getValue();
+
+  try {
+    const response = await fetch("/ssh-write", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: window.sshToken,
+        path: newPath,
+        content
+      })
+    });
+
+    const result = await response.json();
+    console.log("Save As result:", result);
+
+    if (!result.success) {
+      console.error("Failed to save file as:", result.error);
+      return;
+    }
+
+    window.currentOpenFilePath = newPath;
+    window.currentOpenFileName = trimmedName;
+    window.hasUnsavedChanges = false;
+
+    if (typeof loadFileExplorer === "function") {
+      await loadFileExplorer(window.currentDirectory || window.currentExplorerPath || "~");
+    }
+
+    /*if (typeof window.setSourceCodeName === "function") {
+      window.setSourceCodeName(trimmedName);
+    }*/
+
+    /*if (typeof window.updateSourceTabTitle === "function") {
+      window.updateSourceTabTitle();
+    }*/
+
+    if (typeof openServerFile === "function") {
+      await openServerFile(newPath, trimmedName);
+    }
+
+    console.log(`Saved file as: ${newPath}`);
+  } catch (err) {
+    console.error("Error saving file as:", err);
+  }
+
+}
+
+window.saveCurrentFileAs = saveCurrentFileAs;
 
 function showInlineNewItemInput(type) {
     const container = document.getElementById("file-explorer-list");

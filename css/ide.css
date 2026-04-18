@@ -444,7 +444,7 @@ body.light-theme .lm_title input.tab-rename-input {
     flex-shrink: 0;
 }
 
-.font-size-buttons .font-btn {
+/*.font-size-buttons .font-btn {
     font-family: 'JetBrains Mono', 'Consolas', monospace;
     font-weight: 700;
     font-size: 13px;
@@ -478,6 +478,39 @@ body.light-theme .font-size-buttons .font-btn-increase { background: #2563eb; }
 body.light-theme .font-size-buttons .font-btn-increase:hover { background: #1d4ed8; }
 body.light-theme .font-size-buttons .font-btn-decrease { background: #60a5fa; }
 body.light-theme .font-size-buttons .font-btn-decrease:hover { background: #3b82f6; }
+*/
+
+
+.font-size-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.font-btn {
+  background: none;
+  border: none;
+  color: #303234;          /* soft gray like VIM */
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 2px 4px;
+
+  opacity: 0.4;
+  transition: all 0.2s ease;
+}
+
+/* hover effect */
+.font-btn:hover {
+  color: #ffffff;
+  opacity: 1;
+}
+
+/* click effect */
+.font-btn:active {
+  transform: scale(0.95);
+}
+
 
 /* ===== Responsive top navigation ===== */
 #judge0-site-navigation {
@@ -600,4 +633,89 @@ body.light-theme .tree-rename-input {
   background: #ffffff;
   color: #1e1e1e;
   border-color: #007fd4;
+}
+
+body.light-theme #file-explorer-list .file-item,
+body.light-theme #file-explorer-list .file-item span {
+  color: #222 !important;
+}
+
+.file-item {
+  padding: 4px 8px;
+}
+
+/* indentation levels */
+.file-item[data-depth="0"] { padding-left: 8px; }
+.file-item[data-depth="1"] { padding-left: 20px; }
+.file-item[data-depth="2"] { padding-left: 32px; }
+.file-item[data-depth="3"] { padding-left: 44px; }
+
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.file-item:hover {
+  background-color: rgba(128, 128, 128, 0.12);
+}
+
+.file-item .file-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.file-item .file-label i.icon {
+  margin: 0;
+}
+
+/* folders stand out */
+.folder-item .file-label {
+  font-weight: 600;
+}
+
+/* files slightly softer */
+.file-entry .file-label {
+  opacity: 0.85;
+}
+
+/* better spacing between rows */
+.file-item + .file-item {
+  margin-top: 2px;
+}
+
+.folder-item i.icon {
+  color: #e8c547; /* warm yellow like VS Code */
+}
+
+.file-entry i.icon {
+  color: #9aa0a6;
+}
+
+.file-item.active-file {
+  background-color: rgba(128, 128, 128, 0.18);
+}
+
+.file-item.active-file .file-label {
+  font-weight: 600;
+  opacity: 1;
+}
+
+.file-label {
+  color: inherit;
+}
+
+body.dark-theme #file-explorer-list .file-label {
+  color: #e5e7eb !important;
+}
+
+body.light-theme #file-explorer-list .file-label {
+  color: #222 !important;
 }
