@@ -568,10 +568,11 @@ body.light-theme .font-size-buttons .font-btn-decrease:hover { background: #3b82
     }
 }
 
+/* ===== File Explorer list container ===== */
 #file-explorer-list {
   flex: 1;
   overflow-y: auto;
-  padding: 5px 0;
+  padding: 4px 0;
 }
 
 #judge0-sidebar {
@@ -579,36 +580,59 @@ body.light-theme .font-size-buttons .font-btn-decrease:hover { background: #3b82
   flex-direction: column;
 }
 
-.file-item {
-  padding: 6px 10px;
+/* ===== Tree-item hover actions (rename / delete icons) ===== */
+.tree-item .file-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  padding-right: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.tree-item:hover .file-actions {
+  opacity: 1;
+}
+
+.tree-item .file-actions i {
+  color: #858585;
   cursor: pointer;
-  color: white;
-  font-size: 14px;
+  font-size: 12px;
 }
 
-.file-item:hover {
-  background-color: rgba(255, 255, 255, 0.08);
+.tree-item:hover .file-actions i {
+  color: #cccccc;
 }
 
-.file-actions {
-  opacity: 0;                     /* hidden initially */
-  transition: opacity 0.2s ease;  /* smooth fade in */
+.tree-item .file-actions i:hover {
+  color: #ffffff;
 }
 
-.file-item:hover .file-actions {
-  opacity: 1;                     /* show on hover */
+body.light-theme .tree-item .file-actions i { color: #999999; }
+body.light-theme .tree-item:hover .file-actions i { color: #555555; }
+body.light-theme .tree-item .file-actions i:hover { color: #222222; }
+
+/* Inline rename/create input inside the tree */
+.tree-rename-input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid #007fd4;
+  border-radius: 2px;
+  color: #cccccc;
+  font: inherit;
+  font-size: 13px;
+  padding: 0 4px;
+  margin: 0;
+  min-width: 6ch;
+  flex: 1;
+  outline: none;
+  box-sizing: border-box;
 }
 
-.file-actions i {
-  color: #aaa;        /* default color (gray) */
-}
-
-.file-item:hover .file-actions i {
-  color: #ccc;        /* slightly brighter on hover */
-}
-
-.file-actions i:hover {
-  color: #fff;        /* bright white when hovering icon */
+body.light-theme .tree-rename-input {
+  background: #ffffff;
+  color: #1e1e1e;
+  border-color: #007fd4;
 }
 
 body.light-theme #file-explorer-list .file-item,

@@ -45,7 +45,7 @@ const sessions = new Map();
 // SSH connection. They'll be forced to sign in again on their next action.
 // 30 minutes is generous for classroom use (lecture pauses, student walks away)
 // but short enough that abandoned tabs don't hold server connections forever.
-const INACTIVITY_MS = 30 * 60 * 1000;
+const INACTIVITY_MS = 10 * 60 * 1000;
 
 // Mark a session as recently active and (re)arm its idle-reap timer.
 // Called from sign-in and from every WS handler entry. Safe to call on a
@@ -157,6 +157,44 @@ function sshExecForToken(token, command) {
   });
 }
 
+// ===== Login rate limiting =====
+// Tracks failed attempts per IP. After MAX_LOGIN_ATTEMPTS failures within the
+// lockout window, the IP is blocked for LOCKOUT_MS before it can try again.
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_MS = 10 * 60 * 1000; // 10 minutes
+const loginAttempts = new Map(); // ip → { count, lockedUntil }
+
+function getLoginState(ip) {
+  if (!loginAttempts.has(ip)) {
+    loginAttempts.set(ip, { count: 0, lockedUntil: 0 });
+  }
+  return loginAttempts.get(ip);
+}
+
+function recordFailedLogin(ip) {
+  const state = getLoginState(ip);
+  state.count += 1;
+  if (state.count >= MAX_LOGIN_ATTEMPTS) {
+    state.lockedUntil = Date.now() + LOCKOUT_MS;
+    console.log(`[RATE LIMIT] IP ${ip} locked out for ${LOCKOUT_MS / 1000}s after ${state.count} failed attempts`);
+  }
+}
+
+function resetLoginAttempts(ip) {
+  loginAttempts.delete(ip);
+}
+
+// ===== Validate an existing session (used by the frontend on page reload) =====
+app.post("/ssh-validate-session", (req, res) => {
+  const { token } = req.body;
+  const session = getSessionFromToken(token);
+  if (session) {
+    touchSession(token);
+    return res.json({ success: true, username: session.username });
+  }
+  return res.json({ success: false });
+});
+
 // SSH endpoint for sign-in
 // Opens a live SSH connection to validate credentials and KEEPS IT OPEN for
 // the lifetime of the session. The browser gets back a token that it presents
@@ -171,7 +209,21 @@ app.post("/ssh-sign-in", (req, res) => {
     return res.json({ success: false, error: "Username or password missing" });
   }
 
-  console.log(`[SSH LOGIN ATTEMPT] From ${req.ip}`);
+  // Rate-limit check
+  const ip = req.ip;
+  const loginState = getLoginState(ip);
+  if (loginState.lockedUntil > Date.now()) {
+    const remainMs = loginState.lockedUntil - Date.now();
+    const remainMin = Math.ceil(remainMs / 60000);
+    return res.status(429).json({
+      success: false,
+      error: `Too many failed attempts. Try again in ${remainMin} minute${remainMin === 1 ? "" : "s"}.`,
+      lockedUntil: loginState.lockedUntil,
+      retryAfterMs: remainMs
+    });
+  }
+
+  console.log(`[SSH LOGIN ATTEMPT] From ${ip}`);
 
   const conn = new Client();
   let responded = false;
@@ -326,6 +378,7 @@ app.post("/ssh-sign-in", (req, res) => {
         });
 
         // SEND RESPONSE HERE (after homeDir is ready)
+        resetLoginAttempts(ip);
         if (!responded) {
           responded = true;
           res.json({
@@ -344,8 +397,17 @@ app.post("/ssh-sign-in", (req, res) => {
     console.log(`[SSH ERROR] ${err.message}`);
     if (!responded) {
       // Validation-phase failure — tell the browser login failed.
+      recordFailedLogin(ip);
+      const state = getLoginState(ip);
+      const attemptsLeft = Math.max(0, MAX_LOGIN_ATTEMPTS - state.count);
       responded = true;
-      res.json({ success: false, error: "SSH connection failed: " + err.message });
+      res.json({
+        success: false,
+        error: "SSH connection failed: " + err.message,
+        attemptsLeft,
+        lockedUntil: state.lockedUntil > Date.now() ? state.lockedUntil : undefined,
+        retryAfterMs: state.lockedUntil > Date.now() ? state.lockedUntil - Date.now() : undefined
+      });
     } else {
       // Post-validation failure — the live connection died out from under us.
       // Find the token for this client and invalidate. O(n) in sessions count,
