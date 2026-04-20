@@ -122,7 +122,7 @@ var layoutConfig = {
                 componentName: "source",
                 id: "source",
                 title: "Source Code",
-                isClosable: false,
+                isClosable: true,
                 componentState: {
                     readOnly: false
                 }
