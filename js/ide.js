@@ -21,7 +21,7 @@ var fontSize = 13;
 export var layout;
 
 // variables to track the current file name and unsaved changes
-window.currentFileName = "Main.java";
+window.currentFileName = null;
 window.hasUnsavedChanges = false;
 window.isSaving = false;
 window.suppressDirty = true;   // true while we are loading/setting content
@@ -120,9 +120,9 @@ var layoutConfig = {
             content: [{
                 type: "component",
                 componentName: "source",
-                id: "source",
+                id: "source_" + Date.now(),
                 title: "Source Code",
-                isClosable: false,
+                isClosable: true,
                 componentState: {
                     readOnly: false
                 }
@@ -563,19 +563,20 @@ function setSourceCodeName(name) {
 }*/
 
 function newFile(filename) {
+    if (!sourceEditor) return; 
+
     clear();
     window.suppressDirty = true;
     sourceEditor.setValue("");
-    suppressDirty = false;
+    window.suppressDirty = false;
 
-    selectLanguageForExtension(filename.split(".").pop());
-    setSourceCodeName(filename);
+    if (filename) {
+        selectLanguageForExtension(filename.split(".").pop());
+        setSourceCodeName(filename);
+    }
 
     window.hasUnsavedChanges = false;
     window.updateSourceTabTitle();
-
-    // Clear saved source so refresh starts fresh with the new file
-    try { localStorage.removeItem("judge0.sourceCode"); } catch (e) {}
 }
 
 window.setSourceCodeName = setSourceCodeName;
@@ -978,8 +979,6 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     loadLanguages();
     // Default editor language for MVP
-    const JAVA_ID = "62";
-    $selectLanguage.parent(".ui.dropdown").dropdown("set selected", JAVA_ID);
     loadSelectedLanguage(true); // ensure Monaco updates; true avoids filename reset
 
     $compilerOptions = $("#compiler-options");
@@ -1084,38 +1083,43 @@ document.addEventListener("DOMContentLoaded", async function () {
         layout = new GoldenLayout(layoutConfig, $("#judge0-site-content"));
         window.__ideModules = { layout: layout };
 
-        layout.registerComponent("source", function (container, state) {
-            
-            const editor = monaco.editor.create(container.getElement()[0], {
-                automaticLayout: true,
-                scrollBeyondLastLine: true,
-                readOnly: state.readOnly,
-                language: "java",
-                minimap: {
-                    enabled: true
-                },
+layout.registerComponent("source", function (container, state) {
+    
+    const editor = monaco.editor.create(container.getElement()[0], {
+        automaticLayout: true,
+        scrollBeyondLastLine: true,
+        readOnly: state.readOnly,
+        language: "java",
+        minimap: {
+            enabled: true
+        },
 
-                autoIndent: "none",
-                formatOnType: true,
-                formatOnPaste: true,
+        autoIndent: "none",
+        formatOnType: true,
+        formatOnPaste: true,
 
-                autoClosingBrackets: "never",
-                autoClosingQuotes: "never",
-                autoSurround: "never",
+        autoClosingBrackets: "never",
+        autoClosingQuotes: "never",
+        autoSurround: "never",
 
-                glyphMargin: true,
+        glyphMargin: true,
 
-                quickSuggestions: false,
-                suggestOnTriggerCharacters: false,
-                parameterHints: { enabled: false },
-                acceptSuggestionOnEnter: "off",
-                tabCompletion: "off",
-                wordBasedSuggestions: false,
-                snippetSuggestions: "none"
-            });
+        quickSuggestions: false,
+        suggestOnTriggerCharacters: false,
+        parameterHints: { enabled: false },
+        acceptSuggestionOnEnter: "off",
+        tabCompletion: "off",
+        wordBasedSuggestions: false,
+        snippetSuggestions: "none"
+    });
 
-            // Expose the Monaco editor globally so other scripts
-            // can open and save files through it
+    if (!window.sourceEditor) {
+        window.sourceEditor = editor;
+        sourceEditor = editor;
+    }
+
+    // Expose the Monaco editor globally so other scripts
+    // can open and save files through it
             window.sourceEditor = editor;
 
             // Handle Ctrl+S / Cmd+S directly inside Monaco
@@ -1237,7 +1241,18 @@ document.addEventListener("DOMContentLoaded", async function () {
                 const st = container._config.componentState || {};
                 if (st.filePath && window.sourceEditorsByPath) {
                     delete window.sourceEditorsByPath[st.filePath];
-                } else {
+                }
+                if (sourceEditor === editor) {
+    const remaining = Object.values(window.sourceEditors)[0];
+
+    if (remaining) {
+        sourceEditor = remaining;
+        window.sourceEditor = remaining;
+    } else {
+        sourceEditor = null;
+        window.sourceEditor = null;
+    }
+} else {
                     // Save content of local workspace tabs before disposing
                     try {
                         let file = FileManager.findFile(fileId, FileManager.tree);
@@ -1252,6 +1267,11 @@ document.addEventListener("DOMContentLoaded", async function () {
                 } catch(e) {}
                 delete window.sourceEditors[fileId];
                 editor.dispose();
+                if (Object.keys(window.sourceEditors).length === 0) {
+    setTimeout(() => {
+        newFile(getSelectedLanguage().source_file);
+    }, 0);
+}
             });
 
             // Disable F1 command palette and right-click context menu
@@ -1419,16 +1439,23 @@ document.addEventListener("DOMContentLoaded", async function () {
             container.getElement()[0].appendChild(document.getElementById("judge0-chat-container"));
         });
 
+        
+
         layout.on("initialised", function () {
             setupSourceTabInteractions();
             FileManager.init({
                 onOpenFile: (content, name) => {
-                    openFile(content, name);
-                },
-                onRenameFile: (name) => {
-                    setSourceCodeName(name);
-                }
-            });
+    if (!content && !name) return; 
+    openFile(content || "", name || "untitled.txt");
+},
+            onRenameFile: (name) => {
+            setSourceCodeName(name);
+        }
+    });
+
+    if (!window.currentFileName) {
+        newFile("");
+    }
 
             // Handle new file from sidebar
             var sidebarNewFileBtn = document.getElementById("sidebar-new-file");
