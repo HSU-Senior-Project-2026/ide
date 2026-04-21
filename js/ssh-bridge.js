@@ -795,15 +795,24 @@ const DEFAULT_FILES = {
 // Build compile and run commands from the actual filename and language type.
 // For Java the filename is critical (must match public class name); for others
 // it only matters that we use a consistent name for write → compile → run.
+const LANG_EXTENSIONS = {
+    java: "*.java",
+    c:    "*.c",
+    cpp:  "*.cpp",
+    py:   "*.py",
+    js:   "*.js",
+    sh:   "*.sh",
+};
+
 function getCommandsForFile(langType, sourceFile) {
     const base = sourceFile.replace(/\.[^.]+$/, ""); // strip extension
     switch (langType) {
         case "java":
-            return { file: sourceFile, compile: `javac ${sourceFile}`, run: `java -cp . ${base}` };
+            return { file: sourceFile, compile: `javac *.java`, run: `java -cp . ${base}` };
         case "c":
-            return { file: sourceFile, compile: `gcc ${sourceFile} -o main`, run: "./main" };
+            return { file: sourceFile, compile: `gcc *.c -o main`, run: "./main" };
         case "cpp":
-            return { file: sourceFile, compile: `g++ ${sourceFile} -o main`, run: "./main" };
+            return { file: sourceFile, compile: `g++ *.cpp -o main`, run: "./main" };
         case "py":
             return { file: sourceFile, compile: null, run: `python3 ${sourceFile}` };
         case "js":
@@ -832,6 +841,7 @@ wss.on("connection", (ws, req) => {
   const mode     = params.get("mode");
   const langId   = parseInt(params.get("lang") || "0");
   const fileName = params.get("file") || "";   // actual filename from the editor tab
+  const fileDir  = params.get("dir")  || "";   // directory containing the active file
   const cols     = Math.max(10, Math.min(500, parseInt(params.get("cols") || "80")));
   const rows     = Math.max(5,  Math.min(100, parseInt(params.get("rows") || "24")));
 
@@ -898,8 +908,17 @@ wss.on("connection", (ws, req) => {
       const tmpDir = `/tmp/judge0_${token.substring(0, 16)}`;
       const b64 = Buffer.from(sourceCode).toString("base64");
 
+      // Copy all sibling files of the same language from the working directory
+      // into the temp dir so multi-file projects work (e.g. Java classes,
+      // Python imports, C/C++ multi-source builds). The active file is then
+      // overwritten with the (possibly unsaved) editor content.
+      const resolvedDir = fileDir || session.homeDir || "~";
+      const extGlob = LANG_EXTENSIONS[langType];
+      const copyStep = extGlob && fileDir
+          ? `cp ${resolvedDir}/${extGlob} ${tmpDir}/ 2>/dev/null; `
+          : "";
       const compileStep = lang.compile ? ` && cd ${tmpDir} && ${lang.compile}` : "";
-      const fullCmd = `rm -rf ${tmpDir} && mkdir -p ${tmpDir} && printf '%s' '${b64}' | base64 -d > ${tmpDir}/${lang.file}${compileStep}`;
+      const fullCmd = `rm -rf ${tmpDir} && mkdir -p ${tmpDir} && ${copyStep}printf '%s' '${b64}' | base64 -d > ${tmpDir}/${lang.file}${compileStep}`;
 
       console.log(`[COMPILE] user=${username} dir=${tmpDir} file=${lang.file} lang=${langId}`);
 

@@ -122,7 +122,7 @@ var layoutConfig = {
                 componentName: "source",
                 id: "source",
                 title: "Source Code",
-                isClosable: false,
+                isClosable: true,
                 componentState: {
                     readOnly: false
                 }
@@ -216,7 +216,7 @@ function getSelectedLanguageId() {
     }
 }*/
 
-function compileOnly() {
+async function compileOnly() {
     const currentCode = sourceEditor.getValue().trim();
 
     if (currentCode === "") {
@@ -239,6 +239,9 @@ function compileOnly() {
 
     if (compileOutEditor) compileOutEditor.setValue("");
 
+    $statusLine.html("Saving all files...");
+    await saveAllOpenFiles();
+
     $statusLine.html("Compiling...");
 
     // Switch to the Compile tab so the student sees compiler output.
@@ -249,8 +252,11 @@ function compileOnly() {
 
     const langId   = getSelectedLanguageId();
     const fileName = encodeURIComponent(window.currentFileName || "");
+    const fileDir  = encodeURIComponent(window.currentOpenFilePath
+        ? window.currentOpenFilePath.replace(/\/[^/]+$/, "")
+        : "");
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl    = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${langId}&file=${fileName}`;
+    const wsUrl    = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${langId}&file=${fileName}&dir=${fileDir}`;
 
     const ws = new WebSocket(wsUrl);
     let compileOutput = "";
@@ -323,11 +329,16 @@ function updateRunButtonState() {
 }
 
 // For interpreted languages: upload the code via compile WS, then immediately run.
-function autoCompileThenRun(currentCode, languageId) {
+async function autoCompileThenRun(currentCode, languageId) {
+    await saveAllOpenFiles();
+
     const token = window.csciSessionToken;
     const fileName = encodeURIComponent(window.currentFileName || "");
+    const fileDir  = encodeURIComponent(window.currentOpenFilePath
+        ? window.currentOpenFilePath.replace(/\/[^/]+$/, "")
+        : "");
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const compileUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${languageId}&file=${fileName}`;
+    const compileUrl = `${protocol}//${window.location.host}/terminal?token=${token}&mode=compile&lang=${languageId}&file=${fileName}&dir=${fileDir}`;
 
     const compileWs = new WebSocket(compileUrl);
 
@@ -595,6 +606,33 @@ function openFile(content, filename) {
 }
 window.openFile = openFile; // Expose globally for file explorer callbacks
 
+// Saves all open remote-backed tabs to the server. Returns a Promise that
+// resolves when every save has finished (or failed gracefully).
+async function saveAllOpenFiles() {
+    const token = window.sshToken || window.csciSessionToken;
+    const byPath = window.sourceEditorsByPath || {};
+    const promises = [];
+
+    for (const [filePath, entry] of Object.entries(byPath)) {
+        if (!entry || !entry.editor) continue;
+        const content = entry.editor.getValue();
+        promises.push(
+            fetch("/ssh-write", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token, path: filePath, content })
+            }).then(r => r.json()).then(result => {
+                if (!result.success) console.error(`Auto-save failed for ${filePath}:`, result.error);
+            }).catch(err => console.error(`Auto-save error for ${filePath}:`, err))
+        );
+    }
+
+    await Promise.all(promises);
+    window.hasUnsavedChanges = false;
+    if (typeof window.updateSourceTabTitle === "function") window.updateSourceTabTitle();
+}
+window.saveAllOpenFiles = saveAllOpenFiles;
+
 // Opens a remote (server) file in its own Golden Layout tab, or focuses the
 // existing tab if the file is already open. Each remote tab is identified by
 // its absolute server path so the same file can't appear twice.
@@ -630,12 +668,36 @@ function openFileInTab(filePath, fileName, content) {
         return;
     }
 
-    const sourceStack = layout.root.getItemsById("sourceStack")[0];
+    let sourceStack = layout.root.getItemsById("sourceStack")[0];
     if (!sourceStack) {
-        openFile(content, fileName);
-        window.currentOpenFilePath = filePath;
-        window.currentOpenFileName = fileName;
-        return;
+        // The stack was destroyed when the last tab was closed. GoldenLayout
+        // collapses the root row when only one child remains, so we may need
+        // to re-wrap the surviving I/O panel inside a new row first.
+        let root = layout.root.contentItems[0];
+        if (root && root.type !== "row") {
+            // Root collapsed to a single non-row item — wrap it in a row.
+            // We do this by replacing the layout config while preserving state.
+            const ioConfig = root.config;
+            layout.root.contentItems[0].remove();
+            layout.root.addChild({ type: "row", content: [
+                { type: "stack", width: 66, id: "sourceStack", content: [] },
+                ioConfig
+            ]});
+        } else if (root) {
+            root.addChild({
+                type: "stack",
+                width: 66,
+                id: "sourceStack",
+                content: []
+            }, 0);
+        }
+        sourceStack = layout.root.getItemsById("sourceStack")[0];
+        if (!sourceStack) {
+            openFile(content, fileName);
+            window.currentOpenFilePath = filePath;
+            window.currentOpenFileName = fileName;
+            return;
+        }
     }
 
     sourceStack.addChild({

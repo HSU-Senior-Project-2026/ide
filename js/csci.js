@@ -446,6 +446,29 @@ function renderTreeNode(parentEl, node, depth) {
   const actions = document.createElement("div");
   actions.className = "file-actions";
 
+  if (node.type === "directory") {
+    const newFileBtn = document.createElement("i");
+    newFileBtn.className = "plus icon new-file-btn";
+    newFileBtn.title = "New file here";
+    newFileBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!node.expanded) toggleFolder(node);
+      showInlineNewItemInput("file", node);
+    });
+
+    const newFolderBtn = document.createElement("i");
+    newFolderBtn.className = "folder icon new-folder-btn";
+    newFolderBtn.title = "New folder here";
+    newFolderBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!node.expanded) toggleFolder(node);
+      showInlineNewItemInput("folder", node);
+    });
+
+    actions.appendChild(newFileBtn);
+    actions.appendChild(newFolderBtn);
+  }
+
   const renameBtn = document.createElement("i");
   renameBtn.className = "edit icon rename-btn";
   renameBtn.title = "Rename";
@@ -938,17 +961,43 @@ async function saveCurrentFileAs() {
 
 window.saveCurrentFileAs = saveCurrentFileAs;
 
-function showInlineNewItemInput(type) {
-    const container = document.getElementById("file-explorer-list");
-    if (!container) return;
-
+function showInlineNewItemInput(type, folderNode) {
     // Prevent multiple inputs
     if (document.getElementById("inline-new-item")) return;
+
+    // Determine the target directory and the DOM container to insert into.
+    // If a folderNode is provided, insert inside that folder's children container;
+    // otherwise insert at the root of the file explorer.
+    const basePath = folderNode
+        ? folderNode.path
+        : window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
+
+    let insertTarget;
+    let depth = 0;
+
+    if (folderNode) {
+        const folderRow = document.querySelector(`[data-node-path="${CSS.escape(folderNode.path)}"]`);
+        if (folderRow) {
+            depth = Math.round(parseInt(folderRow.style.paddingLeft) / 16) + 1;
+            let childContainer = folderRow.nextElementSibling;
+            if (!childContainer || !childContainer.classList.contains("tree-children")) {
+                childContainer = document.createElement("div");
+                childContainer.className = "tree-children open";
+                folderRow.after(childContainer);
+            }
+            insertTarget = childContainer;
+        }
+    }
+
+    if (!insertTarget) {
+        insertTarget = document.getElementById("file-explorer-list");
+        if (!insertTarget) return;
+    }
 
     const row = document.createElement("div");
     row.id = "inline-new-item";
     row.className = "tree-item";
-    row.style.paddingLeft = "8px";
+    row.style.paddingLeft = (depth * 16 + 8) + "px";
 
     const arrowPlaceholder = document.createElement("span");
     arrowPlaceholder.className = "tree-item-arrow hidden";
@@ -967,7 +1016,11 @@ function showInlineNewItemInput(type) {
     input.spellcheck = false;
     row.appendChild(input);
 
-    container.prepend(row);
+    if (folderNode) {
+        insertTarget.prepend(row);
+    } else {
+        insertTarget.prepend(row);
+    }
     input.focus();
 
     let finished = false;
@@ -982,8 +1035,8 @@ function showInlineNewItemInput(type) {
             return;
         }
 
-        const basePath = window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
         const fullPath = basePath + "/" + name;
+        const refreshPath = window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
 
         try {
             let response, result;
@@ -997,7 +1050,7 @@ function showInlineNewItemInput(type) {
                 result = await response.json();
                 if (!result.success) { console.error("Create file failed:", result.error); return; }
 
-                await loadFileExplorer(basePath);
+                await loadFileExplorer(refreshPath);
                 openServerFile(result.path, name);
             } else {
                 response = await fetch("/ssh-mkdir", {
@@ -1008,7 +1061,7 @@ function showInlineNewItemInput(type) {
                 result = await response.json();
                 if (!result.success) { console.error("Create folder failed:", result.error); return; }
 
-                await loadFileExplorer(basePath);
+                await loadFileExplorer(refreshPath);
             }
         } catch (err) {
             console.error("Error creating item:", err);
