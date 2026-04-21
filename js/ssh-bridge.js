@@ -1,11 +1,18 @@
 // SSH-server Bridge
 
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+
 const express = require("express");
 const { Client } = require("ssh2");
 const http = require("http");
 const path = require("path");
 const crypto = require("crypto");
 const WebSocket = require("ws");
+
+const SSH_HOST = process.env.SSH_HOST || "localhost";
+const SSH_PORT = parseInt(process.env.SSH_PORT, 10) || 22;
+const SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 3000;
+const SERVER_BIND = process.env.SERVER_BIND || "0.0.0.0";
 
 const app = express();
 
@@ -422,8 +429,8 @@ app.post("/ssh-sign-in", (req, res) => {
   });
 
   conn.connect({
-    host: "csci.hsutx.edu",
-    port: 22,
+    host: SSH_HOST,
+    port: SSH_PORT,
     username,
     password,
     readyTimeout: 10000,
@@ -1080,6 +1087,6 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-httpServer.listen(3000, "0.0.0.0", () => {
-  console.log("Server running on http://localhost:3000");
+httpServer.listen(SERVER_PORT, SERVER_BIND, () => {
+  console.log(`Server running on http://${SERVER_BIND}:${SERVER_PORT}`);
 });
