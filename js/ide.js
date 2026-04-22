@@ -608,6 +608,8 @@ window.openFile = openFile; // Expose globally for file explorer callbacks
 
 // Saves all open remote-backed tabs to the server. Returns a Promise that
 // resolves when every save has finished (or failed gracefully).
+const SOURCE_EXTENSIONS = new Set(["java", "c", "cpp", "h", "py", "js", "sh"]);
+
 async function saveAllOpenFiles() {
     const token = window.sshToken || window.csciSessionToken;
     const byPath = window.sourceEditorsByPath || {};
@@ -615,6 +617,10 @@ async function saveAllOpenFiles() {
 
     for (const [filePath, entry] of Object.entries(byPath)) {
         if (!entry || !entry.editor) continue;
+        // Only auto-save source code files — skip data files like .txt
+        // so they aren't accidentally overwritten before a run.
+        const ext = filePath.split(".").pop().toLowerCase();
+        if (!SOURCE_EXTENSIONS.has(ext)) continue;
         const content = entry.editor.getValue();
         promises.push(
             fetch("/ssh-write", {

@@ -37,7 +37,7 @@ app.get("/", (req, res) => {
 //   username, password,          ← credentials (password kept for potential future reconnect)
 //   sshClient,                   ← live ssh2.Client, opened at sign-in and reused
 //   ready,                       ← false if the client has died/closed
-//   tmpDir, langId,              ← populated by compile; consumed by run
+//   workDir, langId,             ← populated by compile; consumed by run
 //   lastActivity, inactivityTimer ← idle-reaping bookkeeping
 // }
 //
@@ -284,7 +284,7 @@ app.post("/ssh-sign-in", (req, res) => {
       sshClient: conn,
       ready: true,
       homeDir,
-      tmpDir: null,
+      workDir: null,
       langId: null,
       lastActivity: Date.now(),
       inactivityTimer: null,
@@ -795,24 +795,15 @@ const DEFAULT_FILES = {
 // Build compile and run commands from the actual filename and language type.
 // For Java the filename is critical (must match public class name); for others
 // it only matters that we use a consistent name for write → compile → run.
-const LANG_EXTENSIONS = {
-    java: "*.java",
-    c:    "*.c",
-    cpp:  "*.cpp",
-    py:   "*.py",
-    js:   "*.js",
-    sh:   "*.sh",
-};
-
 function getCommandsForFile(langType, sourceFile) {
     const base = sourceFile.replace(/\.[^.]+$/, ""); // strip extension
     switch (langType) {
         case "java":
-            return { file: sourceFile, compile: `javac *.java`, run: `java -cp . ${base}` };
+            return { file: sourceFile, compile: `mkdir -p .build && javac -d .build *.java`, run: `java -cp .build ${base}` };
         case "c":
-            return { file: sourceFile, compile: `gcc *.c -o main`, run: "./main" };
+            return { file: sourceFile, compile: `mkdir -p .build && gcc *.c -o .build/main`, run: ".build/main" };
         case "cpp":
-            return { file: sourceFile, compile: `g++ *.cpp -o main`, run: "./main" };
+            return { file: sourceFile, compile: `mkdir -p .build && g++ *.cpp -o .build/main`, run: ".build/main" };
         case "py":
             return { file: sourceFile, compile: null, run: `python3 ${sourceFile}` };
         case "js":
@@ -905,22 +896,17 @@ wss.on("connection", (ws, req) => {
       const sourceCode = rawData.toString();
       const { username } = session;
 
-      const tmpDir = `/tmp/judge0_${token.substring(0, 16)}`;
+      // Work directly in the user's directory so all project files (source,
+      // data, configs) are available without copying. Compiled artifacts
+      // (.class files, binaries) go into a .build subfolder to stay tidy.
+      const workDir = fileDir || session.homeDir || `~`;
       const b64 = Buffer.from(sourceCode).toString("base64");
 
-      // Copy all sibling files of the same language from the working directory
-      // into the temp dir so multi-file projects work (e.g. Java classes,
-      // Python imports, C/C++ multi-source builds). The active file is then
-      // overwritten with the (possibly unsaved) editor content.
-      const resolvedDir = fileDir || session.homeDir || "~";
-      const extGlob = LANG_EXTENSIONS[langType];
-      const copyStep = extGlob && fileDir
-          ? `cp ${resolvedDir}/${extGlob} ${tmpDir}/ 2>/dev/null; `
-          : "";
-      const compileStep = lang.compile ? ` && cd ${tmpDir} && ${lang.compile}` : "";
-      const fullCmd = `rm -rf ${tmpDir} && mkdir -p ${tmpDir} && ${copyStep}printf '%s' '${b64}' | base64 -d > ${tmpDir}/${lang.file}${compileStep}`;
+      const saveStep = `printf '%s' '${b64}' | base64 -d > ${workDir}/${lang.file}`;
+      const compileStep = lang.compile ? ` && cd ${workDir} && ${lang.compile}` : "";
+      const fullCmd = `${saveStep}${compileStep}`;
 
-      console.log(`[COMPILE] user=${username} dir=${tmpDir} file=${lang.file} lang=${langId}`);
+      console.log(`[COMPILE] user=${username} dir=${workDir} file=${lang.file} lang=${langId}`);
 
       sshClient.exec(fullCmd, (err, stream) => {
         if (err) {
@@ -934,15 +920,13 @@ wss.on("connection", (ws, req) => {
 
         stream.on("close", (exitCode) => {
           if (exitCode === 0) {
-            // Store the temp dir, language, AND the run command in the session
-            // so the run handler uses the correct filename-derived command.
-            session.tmpDir  = tmpDir;
+            session.workDir = workDir;
             session.langId  = langId;
             session.runCmd  = lang.run;
             console.log(`[COMPILE SUCCESS] user=${username}`);
             ws.close(4000, "success");
           } else {
-            session.tmpDir = null;
+            session.workDir = null;
             console.log(`[COMPILE FAILED] user=${username} exitCode=${exitCode}`);
             ws.close(4001, "failed");
           }
@@ -961,20 +945,18 @@ wss.on("connection", (ws, req) => {
   //   xterm.js keystrokes → WebSocket → SSH stdin
   // ─────────────────────────────────────────────────────────────────────────
   if (mode === "run") {
-    if (!session.tmpDir || !session.runCmd) {
+    if (!session.workDir || !session.runCmd) {
       ws.send("ERROR: No compiled code found. Please compile before running.\r\n");
       ws.close();
       return;
     }
 
-    const { username, tmpDir } = session;
+    const { username, workDir } = session;
 
-    // exec replaces the shell with the program so it owns the PTY directly.
-    // session.runCmd was set by the compile handler using the actual filename
-    // (e.g. "java -cp . HelloWorld" instead of hardcoded "java -cp . Main").
-    const runCmd = `ulimit -t 10 && cd ${tmpDir} && exec ${session.runCmd}`;
+    // Run in the user's actual directory so file I/O resolves naturally.
+    const runCmd = `ulimit -t 10 && cd ${workDir} && exec ${session.runCmd}`;
 
-    console.log(`[RUN] user=${username} dir=${tmpDir}`);
+    console.log(`[RUN] user=${username} dir=${workDir}`);
 
     sshClient.exec(runCmd, { pty: { term: "xterm-256color", cols, rows } }, (err, stream) => {
       if (err) {

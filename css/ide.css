@@ -270,6 +270,15 @@ html, body {
     background: rgba(255, 255, 255, 0.05);
 }
 
+.tree-item.dragging {
+    opacity: 0.4;
+}
+
+.tree-item.drop-target {
+    background: rgba(73, 144, 217, 0.3);
+    outline: 1px dashed #4a90d9;
+}
+
 .tree-item-indent {
     display: inline-block;
     width: 16px;

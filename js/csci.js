@@ -490,6 +490,56 @@ function renderTreeNode(parentEl, node, depth) {
   actions.appendChild(deleteBtn);
   row.appendChild(actions);
 
+  // Drag and drop
+  row.draggable = true;
+  row.addEventListener("dragstart", (e) => {
+    e.stopPropagation();
+    e.dataTransfer.setData("text/plain", JSON.stringify({ path: node.path, name: node.name }));
+    row.classList.add("dragging");
+  });
+  row.addEventListener("dragend", () => row.classList.remove("dragging"));
+
+  if (node.type === "directory") {
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.add("drop-target");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drop-target"));
+    row.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.remove("drop-target");
+
+      let data;
+      try { data = JSON.parse(e.dataTransfer.getData("text/plain")); } catch { return; }
+      if (!data || !data.path) return;
+
+      const destPath = node.path + "/" + data.name;
+      if (data.path === destPath || data.path === node.path) return;
+
+      try {
+        const response = await fetch("/ssh-mv", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: window.sshToken, from: data.path, to: destPath })
+        });
+        const result = await response.json();
+        if (result.success) {
+          if (typeof window.renameRemoteTabByPath === "function") {
+            window.renameRemoteTabByPath(data.path, destPath, data.name);
+          }
+          const basePath = window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
+          await loadFileExplorer(basePath);
+        } else {
+          console.error("Move failed:", result.error);
+        }
+      } catch (err) {
+        console.error("Error moving file:", err);
+      }
+    });
+  }
+
   // Click: expand/collapse folder, or open file
   row.addEventListener("click", () => {
     if (node.type === "directory") {
@@ -880,6 +930,15 @@ document.getElementById("sidebar-new-folder")?.addEventListener("click", () => {
     }
 
     showInlineNewItemInput("folder");
+});
+
+document.getElementById("sidebar-refresh")?.addEventListener("click", () => {
+    if (!window.sshToken) {
+        console.error("No SSH token found.");
+        return;
+    }
+    const basePath = window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
+    loadFileExplorer(basePath);
 });
 
 function getParentDirectory(filePath) {
