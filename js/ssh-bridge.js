@@ -6,6 +6,7 @@ const http = require("http");
 const path = require("path");
 const crypto = require("crypto");
 const WebSocket = require("ws");
+const { Session } = require("inspector");
 
 const app = express();
 
@@ -70,6 +71,11 @@ function invalidateSession(token, reason) {
   if (!session) return;
   console.log(`[SESSION INVALIDATED] token: ${token.substring(0, 8)}... user=${session.username} reason=${reason}`);
   session.ready = false;
+  if(session.keepaliveInterval)
+  {
+    clearInterval(session.keepAliveInterval);
+    session.keepAliveInterval= null;
+  }
   if (session.inactivityTimer) {
     clearTimeout(session.inactivityTimer);
     session.inactivityTimer = null;
@@ -362,8 +368,34 @@ app.post("/ssh-sign-in", (req, res) => {
           langId: null,
           lastActivity: Date.now(),
           inactivityTimer: null,
+          keepAliveInterval: null
         });
 
+//Application level keep alive 
+const kaInterval = setInterval(() =>{
+const s = sessions.get(token);
+if(!s || !s.ready || !s.sshClient)
+{
+  clearInterval(kaInterval);
+  return;
+}
+try
+{
+  s.sshClient.exec("true", (err,stream) =>{
+    if(err) return;
+    stream.on("close", () => {});
+  });
+}
+catch(e)
+{
+  console.log(`[KEEP ALIVE ERROR] ${e.message}`);
+  clearInterval(kaInterval);
+  invalidateSession(token, "keepalive-failed");
+}
+
+}, 8000);
+
+sessions.get(token).keepAliveInterval= kaInterval;
         console.log(`[SSH HOME] user=${username} home=${homeDir}`);
         console.log(`[SESSION CREATED] token=${token.substring(0, 8)}...`);
 
