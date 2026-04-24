@@ -374,10 +374,14 @@ function getFileIconClass(name) {
   switch (ext) {
     case "java": return "file-java";
     case "py":   return "file-py";
-    case "c": case "h": return "file-c";
-    case "cpp": case "cc": case "cxx": case "hpp": return "file-c";
+    case "c": case "h": case "cpp": case "cc": case "cxx": case "hpp": return "file-c";
     case "js":   return "file-js";
-    case "txt": case "text": case "md": return "file-txt";
+    case "html": case "htm": return "file-html";
+    case "css":  return "file-css";
+    case "json": return "file-json";
+    case "sh": case "bash": return "file-sh";
+    case "sql": return "file-sql";
+    case "txt": case "text": case "md": case "log": return "file-txt";
     default: return "file-default";
   }
 }
@@ -425,14 +429,12 @@ function renderTreeNode(parentEl, node, depth) {
   arrow.textContent = "\u25B6"; // ▶
   row.appendChild(arrow);
 
-  // Icon
+  // Icon (rendered via CSS background-image, no emoji)
   const icon = document.createElement("span");
   if (node.type === "directory") {
-    icon.className = "tree-item-icon folder";
-    icon.textContent = node.expanded ? "\uD83D\uDCC2" : "\uD83D\uDCC1"; // 📂 / 📁
+    icon.className = "tree-item-icon " + (node.expanded ? "folder-open" : "folder");
   } else {
     icon.className = "tree-item-icon " + getFileIconClass(node.name);
-    icon.textContent = "\uD83D\uDCC4"; // 📄
   }
   row.appendChild(icon);
 
@@ -1065,7 +1067,6 @@ function showInlineNewItemInput(type, folderNode) {
 
     const icon = document.createElement("span");
     icon.className = "tree-item-icon " + (type === "folder" ? "folder" : "file-default");
-    icon.textContent = type === "folder" ? "\uD83D\uDCC1" : "\uD83D\uDCC4";
     row.appendChild(icon);
 
     const input = document.createElement("input");
