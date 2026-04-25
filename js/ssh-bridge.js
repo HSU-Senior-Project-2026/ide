@@ -410,7 +410,7 @@ app.post("/ssh-sign-in", (req, res) => {
       responded = true;
       res.json({
         success: false,
-        error: "SSH connection failed: " + err.message,
+        error: "Incorrect username or password",
         attemptsLeft,
         lockedUntil: state.lockedUntil > Date.now() ? state.lockedUntil : undefined,
         retryAfterMs: state.lockedUntil > Date.now() ? state.lockedUntil - Date.now() : undefined

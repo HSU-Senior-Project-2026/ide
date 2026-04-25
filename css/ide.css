@@ -742,3 +742,70 @@ body.dark-theme #file-explorer-list .file-label {
 body.light-theme #file-explorer-list .file-label {
   color: #222 !important;
 }
+
+#loading-screen {
+  position: fixed;
+  inset: 0;
+  background: #1e1e1e;
+  color: white;
+  z-index: 99999;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+
+  font-family: Arial, sans-serif;
+}
+
+.loading-logo {
+  width: 250px;
+  height: auto;
+  margin-bottom: 16px;
+}
+
+#loading-screen.fade-out {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+#loading-screen p {
+  font-size: 40px;   /* increase this */
+  margin-top: 10px;
+  font-family: 'Orbitron', sans-serif;
+}
+
+.signin-logo {
+  width: 50px;
+  height:auto;
+  /* margin-bottom: 10px; */
+}
+
+.signin-content {
+  text-align: center;
+}
+
+#judge0-csci-sign-in-modal {
+  max-width: 420px;
+  width: 90%;
+}
+
+.signin-brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  /*margin-bottom: 24px;*/
+}
+
+.signin-logo-small {
+  width: 40px;
+  height: auto;
+}
+
+.signin-title {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
