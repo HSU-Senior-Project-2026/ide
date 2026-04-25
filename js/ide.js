@@ -1796,3 +1796,17 @@ window.decreaseFont = function () {
         setFontSizeForAllEditors(fontSize);
     }
 };
+
+window.addEventListener("load", function () {
+  const loadingScreen = document.getElementById("loading-screen");
+
+  setTimeout(() => {
+    if (loadingScreen) {
+      loadingScreen.classList.add("fade-out");
+
+      setTimeout(() => {
+        loadingScreen.style.display = "none";
+      }, 400);
+    }
+  }, 1000); // keeps loading screen visible for 1.5 seconds
+});
