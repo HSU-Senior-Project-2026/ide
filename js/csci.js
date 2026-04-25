@@ -374,10 +374,14 @@ function getFileIconClass(name) {
   switch (ext) {
     case "java": return "file-java";
     case "py":   return "file-py";
-    case "c": case "h": return "file-c";
-    case "cpp": case "cc": case "cxx": case "hpp": return "file-c";
+    case "c": case "h": case "cpp": case "cc": case "cxx": case "hpp": return "file-c";
     case "js":   return "file-js";
-    case "txt": case "text": case "md": return "file-txt";
+    case "html": case "htm": return "file-html";
+    case "css":  return "file-css";
+    case "json": return "file-json";
+    case "sh": case "bash": return "file-sh";
+    case "sql": return "file-sql";
+    case "txt": case "text": case "md": case "log": return "file-txt";
     default: return "file-default";
   }
 }
@@ -425,14 +429,12 @@ function renderTreeNode(parentEl, node, depth) {
   arrow.textContent = "\u25B6"; // ▶
   row.appendChild(arrow);
 
-  // Icon
+  // Icon (rendered via CSS background-image, no emoji)
   const icon = document.createElement("span");
   if (node.type === "directory") {
-    icon.className = "tree-item-icon folder";
-    icon.textContent = node.expanded ? "\uD83D\uDCC2" : "\uD83D\uDCC1"; // 📂 / 📁
+    icon.className = "tree-item-icon " + (node.expanded ? "folder-open" : "folder");
   } else {
     icon.className = "tree-item-icon " + getFileIconClass(node.name);
-    icon.textContent = "\uD83D\uDCC4"; // 📄
   }
   row.appendChild(icon);
 
@@ -445,6 +447,29 @@ function renderTreeNode(parentEl, node, depth) {
   // Hover actions (rename + delete)
   const actions = document.createElement("div");
   actions.className = "file-actions";
+
+  if (node.type === "directory") {
+    const newFileBtn = document.createElement("i");
+    newFileBtn.className = "plus icon new-file-btn";
+    newFileBtn.title = "New file here";
+    newFileBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!node.expanded) toggleFolder(node);
+      showInlineNewItemInput("file", node);
+    });
+
+    const newFolderBtn = document.createElement("i");
+    newFolderBtn.className = "folder icon new-folder-btn";
+    newFolderBtn.title = "New folder here";
+    newFolderBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!node.expanded) toggleFolder(node);
+      showInlineNewItemInput("folder", node);
+    });
+
+    actions.appendChild(newFileBtn);
+    actions.appendChild(newFolderBtn);
+  }
 
   const renameBtn = document.createElement("i");
   renameBtn.className = "edit icon rename-btn";
@@ -466,6 +491,56 @@ function renderTreeNode(parentEl, node, depth) {
   actions.appendChild(renameBtn);
   actions.appendChild(deleteBtn);
   row.appendChild(actions);
+
+  // Drag and drop
+  row.draggable = true;
+  row.addEventListener("dragstart", (e) => {
+    e.stopPropagation();
+    e.dataTransfer.setData("text/plain", JSON.stringify({ path: node.path, name: node.name }));
+    row.classList.add("dragging");
+  });
+  row.addEventListener("dragend", () => row.classList.remove("dragging"));
+
+  if (node.type === "directory") {
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.add("drop-target");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drop-target"));
+    row.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.remove("drop-target");
+
+      let data;
+      try { data = JSON.parse(e.dataTransfer.getData("text/plain")); } catch { return; }
+      if (!data || !data.path) return;
+
+      const destPath = node.path + "/" + data.name;
+      if (data.path === destPath || data.path === node.path) return;
+
+      try {
+        const response = await fetch("/ssh-mv", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: window.sshToken, from: data.path, to: destPath })
+        });
+        const result = await response.json();
+        if (result.success) {
+          if (typeof window.renameRemoteTabByPath === "function") {
+            window.renameRemoteTabByPath(data.path, destPath, data.name);
+          }
+          const basePath = window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
+          await loadFileExplorer(basePath);
+        } else {
+          console.error("Move failed:", result.error);
+        }
+      } catch (err) {
+        console.error("Error moving file:", err);
+      }
+    });
+  }
 
   // Click: expand/collapse folder, or open file
   row.addEventListener("click", () => {
@@ -859,6 +934,15 @@ document.getElementById("sidebar-new-folder")?.addEventListener("click", () => {
     showInlineNewItemInput("folder");
 });
 
+document.getElementById("sidebar-refresh")?.addEventListener("click", () => {
+    if (!window.sshToken) {
+        console.error("No SSH token found.");
+        return;
+    }
+    const basePath = window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
+    loadFileExplorer(basePath);
+});
+
 function getParentDirectory(filePath) {
   const lastSlash = filePath.lastIndexOf("/");
   return lastSlash > 0 ? filePath.substring(0, lastSlash) : "";
@@ -938,17 +1022,43 @@ async function saveCurrentFileAs() {
 
 window.saveCurrentFileAs = saveCurrentFileAs;
 
-function showInlineNewItemInput(type) {
-    const container = document.getElementById("file-explorer-list");
-    if (!container) return;
-
+function showInlineNewItemInput(type, folderNode) {
     // Prevent multiple inputs
     if (document.getElementById("inline-new-item")) return;
+
+    // Determine the target directory and the DOM container to insert into.
+    // If a folderNode is provided, insert inside that folder's children container;
+    // otherwise insert at the root of the file explorer.
+    const basePath = folderNode
+        ? folderNode.path
+        : window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
+
+    let insertTarget;
+    let depth = 0;
+
+    if (folderNode) {
+        const folderRow = document.querySelector(`[data-node-path="${CSS.escape(folderNode.path)}"]`);
+        if (folderRow) {
+            depth = Math.round(parseInt(folderRow.style.paddingLeft) / 16) + 1;
+            let childContainer = folderRow.nextElementSibling;
+            if (!childContainer || !childContainer.classList.contains("tree-children")) {
+                childContainer = document.createElement("div");
+                childContainer.className = "tree-children open";
+                folderRow.after(childContainer);
+            }
+            insertTarget = childContainer;
+        }
+    }
+
+    if (!insertTarget) {
+        insertTarget = document.getElementById("file-explorer-list");
+        if (!insertTarget) return;
+    }
 
     const row = document.createElement("div");
     row.id = "inline-new-item";
     row.className = "tree-item";
-    row.style.paddingLeft = "8px";
+    row.style.paddingLeft = (depth * 16 + 8) + "px";
 
     const arrowPlaceholder = document.createElement("span");
     arrowPlaceholder.className = "tree-item-arrow hidden";
@@ -957,7 +1067,6 @@ function showInlineNewItemInput(type) {
 
     const icon = document.createElement("span");
     icon.className = "tree-item-icon " + (type === "folder" ? "folder" : "file-default");
-    icon.textContent = type === "folder" ? "\uD83D\uDCC1" : "\uD83D\uDCC4";
     row.appendChild(icon);
 
     const input = document.createElement("input");
@@ -967,7 +1076,11 @@ function showInlineNewItemInput(type) {
     input.spellcheck = false;
     row.appendChild(input);
 
-    container.prepend(row);
+    if (folderNode) {
+        insertTarget.prepend(row);
+    } else {
+        insertTarget.prepend(row);
+    }
     input.focus();
 
     let finished = false;
@@ -982,8 +1095,8 @@ function showInlineNewItemInput(type) {
             return;
         }
 
-        const basePath = window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
         const fullPath = basePath + "/" + name;
+        const refreshPath = window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
 
         try {
             let response, result;
@@ -997,7 +1110,7 @@ function showInlineNewItemInput(type) {
                 result = await response.json();
                 if (!result.success) { console.error("Create file failed:", result.error); return; }
 
-                await loadFileExplorer(basePath);
+                await loadFileExplorer(refreshPath);
                 openServerFile(result.path, name);
             } else {
                 response = await fetch("/ssh-mkdir", {
@@ -1008,7 +1121,7 @@ function showInlineNewItemInput(type) {
                 result = await response.json();
                 if (!result.success) { console.error("Create folder failed:", result.error); return; }
 
-                await loadFileExplorer(basePath);
+                await loadFileExplorer(refreshPath);
             }
         } catch (err) {
             console.error("Error creating item:", err);
