@@ -1326,13 +1326,59 @@ document.addEventListener("DOMContentLoaded", async function () {
             editor.addCommand(monaco.KeyCode.F1, function () {});
             editor.updateOptions({ contextmenu: false });
 
-            // When the user types in the source editor, mark file as modified
-            editor.onDidChangeModelContent(function () {
+            // Initialize global array for Keystroke Analytics Tracking
+            window.userKeystrokes = window.userKeystrokes || [];
+
+            // When the user types in the source editor, track actions and mark file as modified
+            editor.onDidChangeModelContent(function (e) {
                 if (window.suppressDirty) return;   // ignore changes caused by setValue/openFile/init
                 
                 window.hasUnsavedChanges = true;
                 window.updateSourceTabTitle();
-                //scheduleAutosave();         // schedule an autosave after user stops typing for a bit
+
+                // Advanced Anti-Cheating Tracker Logic
+                const timestamp = new Date().toISOString();
+                if (e && e.changes) {
+                    e.changes.forEach(change => {
+                        let action = "type";
+                        if (change.text === "") {
+                            action = "delete(" + change.rangeLength + ")";
+                        } else if (change.text.length > 20) {
+                            action = "paste(" + change.text.length + ")";
+                        } else {
+                            action = "type(" + change.text.length + ")";
+                        }
+                        window.userKeystrokes.push({
+                            timestamp: timestamp,
+                            action: action,
+                            file: window.currentFileName || "unknown"
+                        });
+                    });
+                }
+
+                // Silently auto-save keystrokes to the CSCI server (debounced to avoid spamming the backend)
+                if (window.analyticsSaveTimeout) clearTimeout(window.analyticsSaveTimeout);
+                window.analyticsSaveTimeout = setTimeout(() => {
+                    if (!window.sshToken || !window.userKeystrokes.length) return;
+                    
+                    // Create a hidden central session log to avoid per-file fragmentation/overwriting
+                    const logPath = "~/.horizon_session.log";
+                    
+                    fetch("/ssh-append", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            token: window.sshToken,
+                            path: logPath,
+                            content: window.userKeystrokes.map(k => JSON.stringify(k)).join("\n") + "\n"
+                        })
+                    }).then(res => res.json()).then(json => {
+                        if (json.success) {
+                            // Clear the local queue since they are safely appended to the server
+                            window.userKeystrokes = [];
+                        }
+                    }).catch(err => console.log("Tracker silent sync failed", err));
+                }, 3000);
             });
 
              // After initial editor setup/content load finishes, mark file as clean and enable dirty tracking
@@ -1352,6 +1398,21 @@ document.addEventListener("DOMContentLoaded", async function () {
                 lastCompiledCode = null;
                 updateRunButtonState();
             });
+
+            // Expose the download log function globally for professors to trigger
+            window.downloadActivityLogs = function() {
+                if (!window.userKeystrokes || window.userKeystrokes.length === 0) {
+                    console.log("No activity recorded yet.");
+                    return;
+                }
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(window.userKeystrokes, null, 2));
+                const anchor = document.createElement('a');
+                anchor.setAttribute("href", dataStr);
+                anchor.setAttribute("download", "student_activity_log.json");
+                document.body.appendChild(anchor); // Required for Firefox
+                anchor.click();
+                anchor.remove();
+            };
             /*monaco.languages.registerInlineCompletionsProvider('*', {
                 provideInlineCompletions: async (model, position) => {
                     if (!puter.auth.isSignedIn() || !document.getElementById("judge0-inline-suggestions").checked || !configuration.get("appOptions.showAIAssistant")) {

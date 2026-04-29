@@ -62,14 +62,44 @@ function hideSignInModal() {
 }
 
 // Sets the shared signed-in state across ide.js + csci.js and updates the nav UI.
-function applySignedInUI(username, token) {
+function applySignedInUI(username, token, isAdmin) {
   window.csciSessionToken = token;
   window.sshToken = token;
+  window.isProfessor = !!isAdmin;
+  window.isGraderMode = false;
 
   var displayName = (username || "").split("@")[0] || "User";
   document.getElementById("judge0-account-label").textContent = displayName;
   document.getElementById("judge0-csci-sign-in-btn").style.display = "none";
   document.getElementById("judge0-csci-sign-out-btn").style.display = "";
+
+  // Dynamically inject the Grader Mode button into the Account dropdown if they are auth'd
+  let graderBtn = document.getElementById("grader-mode-btn");
+  if (!graderBtn) {
+      const signOutBtn = document.getElementById("judge0-csci-sign-out-btn");
+      if (signOutBtn && signOutBtn.parentNode) {
+          graderBtn = document.createElement("div");
+          graderBtn.id = "grader-mode-btn";
+          graderBtn.className = "item";
+          graderBtn.style.cursor = "pointer";
+          graderBtn.innerHTML = "<i class=\"folder open icon\"></i> Grader Mode";
+          graderBtn.onclick = function() {
+              window.isGraderMode = !window.isGraderMode;
+              if (window.isGraderMode) {
+                  graderBtn.innerHTML = "<i class=\"folder open icon\" style=\"color:orange;\"></i> Exit Grader Mode";
+                  loadFileExplorer("/home"); // Native request to load all students
+              } else {
+                  graderBtn.innerHTML = "<i class=\"folder open icon\"></i> Grader Mode";
+                  loadFileExplorer("~");     // Return to isolated local user map
+              }
+          };
+          signOutBtn.parentNode.insertBefore(graderBtn, signOutBtn);
+      }
+  }
+  
+  if (graderBtn) {
+      graderBtn.style.display = window.isProfessor ? "" : "none";
+  }
 
   window.dispatchEvent(new Event("csci-signed-in"));
 }
@@ -153,7 +183,7 @@ async function tryRestoreSession() {
     });
     var result = await response.json();
     if (result.success) {
-      applySignedInUI(result.username || username, token);
+      applySignedInUI(result.username || username, token, result.isAdmin);
       loadFileExplorer("~");
       return true;
     }
@@ -194,12 +224,13 @@ async function signIn(e) {
       clearSignInError();
       showNotification(`Connected to CSCI server as ${username}`, "success");
 
-      applySignedInUI(username, result.token);
+      applySignedInUI(username, result.token, result.isAdmin);
 
       // Persist session so a page reload doesn't force re-auth
       try {
         sessionStorage.setItem("csci.token", result.token);
         sessionStorage.setItem("csci.username", username);
+        sessionStorage.setItem("csci.isAdmin", result.isAdmin ? "true" : "false");
       } catch (_) {}
 
       loadFileExplorer("~");
@@ -279,7 +310,13 @@ window.explorerTree = null;
 // Fetch one directory listing and convert to child nodes.
 function entriesToNodes(entries, parentPath) {
   return entries
-    .filter(e => e.name !== ".." && e.name !== ".")
+    .filter(e => {
+        if (e.name === ".." || e.name === ".") return false;
+        // In Grader Mode, completely bypass the filter to reveal .log files
+        if (window.isGraderMode) return true;
+        // Standard student view hides compiled classes and background telemetry logs
+        return !e.name.endsWith(".class") && !e.name.startsWith(".");
+    })
     .map(e => ({
       name: e.name,
       type: e.type,
@@ -343,7 +380,7 @@ async function loadFileExplorer(path = "~") {
 
     const children = entriesToNodes(result.entries, result.path);
 
-    if (!window.explorerTree || path === "~" || result.path === (window.explorerTree && window.explorerTree.path)) {
+    if (!window.explorerTree || path === "~" || path === "/home" || result.path === (window.explorerTree && window.explorerTree.path)) {
       // Root load or reload
       window.explorerTree = {
         name: "~",
@@ -490,6 +527,51 @@ function renderTreeNode(parentEl, node, depth) {
 
   actions.appendChild(renameBtn);
   actions.appendChild(deleteBtn);
+  
+  if (node.type !== "directory") {
+      const downloadBtn = document.createElement("i");
+      downloadBtn.className = "download icon download-btn";
+      downloadBtn.title = "Download File";
+      downloadBtn.style.cursor = "pointer";
+      downloadBtn.style.marginLeft = "4px";
+      downloadBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+              const res = await fetch("/ssh-read", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ token: window.sshToken, path: node.path })
+              });
+              const json = await res.json();
+              if (json.success) {
+                  const blob = new Blob([json.content], { type: 'text/plain' });
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = node.name;
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  window.URL.revokeObjectURL(url);
+              }
+          } catch(err) { console.error("Download failed", err); }
+      });
+      actions.appendChild(downloadBtn);
+  }
+  
+  if (node.type === "directory" && window.isGraderMode) {
+      const zipBtn = document.createElement("i");
+      zipBtn.className = "file archive outline icon";
+      zipBtn.title = "Download as ZIP";
+      zipBtn.style.cursor = "pointer";
+      zipBtn.style.marginLeft = "4px";
+      zipBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          window.location.href = `/ssh-zip?token=${encodeURIComponent(window.sshToken)}&path=${encodeURIComponent(node.path)}`;
+      });
+      actions.appendChild(zipBtn);
+  }
+
   row.appendChild(actions);
 
   // Drag and drop

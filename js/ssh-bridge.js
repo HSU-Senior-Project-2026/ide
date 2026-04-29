@@ -122,7 +122,12 @@ async function validatePathForToken(token, inputPath) {
     resolved = path.posix.normalize(resolved);
   }
 
-  if (resolved !== session.homeDir && !resolved.startsWith(session.homeDir + "/")) {
+  const adminString = process.env.CSCI_ADMIN_USERS || "";
+  const adminUsers = adminString.split(",").map(u => u.trim().toLowerCase());
+  const actualUser = (session.username || "").split("@")[0].toLowerCase().trim();
+  const isProfessor = adminUsers.includes(actualUser);
+
+  if (!isProfessor && resolved !== session.homeDir && !resolved.startsWith(session.homeDir + "/")) {
     throw new Error("Access denied: path is outside your home directory");
   }
 
@@ -197,7 +202,10 @@ app.post("/ssh-validate-session", (req, res) => {
   const session = getSessionFromToken(token);
   if (session) {
     touchSession(token);
-    return res.json({ success: true, username: session.username });
+    const adminString = process.env.CSCI_ADMIN_USERS || "";
+    const adminUsers = adminString.split(",").map(u => u.trim().toLowerCase());
+    const isProfessor = adminUsers.includes(session.username.split("@")[0].toLowerCase().trim());
+    return res.json({ success: true, username: session.username, isAdmin: isProfessor });
   }
   return res.json({ success: false });
 });
@@ -384,6 +392,11 @@ app.post("/ssh-sign-in", (req, res) => {
           invalidateSession(token, "client-ended");
         });
 
+        // Identify if this user is a professor/admin
+        const adminString = process.env.CSCI_ADMIN_USERS || "";
+        const adminUsers = adminString.split(",").map(u => u.trim().toLowerCase());
+        const isProfessor = adminUsers.includes(username.split("@")[0].toLowerCase().trim());
+
         // SEND RESPONSE HERE (after homeDir is ready)
         resetLoginAttempts(ip);
         if (!responded) {
@@ -391,6 +404,7 @@ app.post("/ssh-sign-in", (req, res) => {
           res.json({
             success: true,
             token,
+            isAdmin: isProfessor,
             message: "Signed in successfully"
           });
         }
@@ -522,6 +536,49 @@ app.post("/ssh-write", async (req, res) => {
   }
 });
 
+// Append content to a file (used for robust activity logging)
+app.post("/ssh-append", async (req, res) => {
+    const { token, path: filePath, content } = req.body;
+    if (!token || !filePath) return res.status(400).json({ success: false, error: "Token and path are required" });
+
+    try {
+        const resolvedPath = await validatePathForToken(token, filePath);
+        // Base64 encode to handle special characters/newlines safely in the echo command
+        const encoded = Buffer.from(content || "").toString("base64");
+        await sshExecForToken(token, `echo ${JSON.stringify(encoded)} | base64 -d >> ${JSON.stringify(resolvedPath)}`);
+        res.json({ success: true });
+    } catch (err) {
+        console.error("[SSH-APPEND ERROR]", err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Pack a directory into a ZIP and stream it back (Grader Mode)
+app.get("/ssh-zip", async (req, res) => {
+    const { token, path: dirPath } = req.query;
+    if (!token || !dirPath) return res.status(400).send("Missing parameters");
+
+    try {
+        const session = getSessionFromToken(token);
+        if (!session) return res.status(401).send("Invalid session");
+        
+        const resolvedPath = await validatePathForToken(token, dirPath);
+        
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${path.posix.basename(resolvedPath)}.zip"`);
+
+        // Execute ZIP command and pipe stdout directly to the Express response
+        session.sshClient.exec(`zip -r - ${JSON.stringify(resolvedPath)}`, (err, stream) => {
+            if (err) return res.status(500).send(err.message);
+            stream.pipe(res);
+            stream.stderr.on('data', data => console.log("ZIP stderr:", data.toString()));
+        });
+    } catch (err) {
+        console.error("[SSH-ZIP ERROR]", err.message);
+        res.status(500).send(err.message);
+    }
+});
+
 // List files and folders in the signed-in user's home directory.
 // Uses the existing token-based SSH session and prevents access
 // outside the user's home directory.
@@ -557,7 +614,7 @@ app.post("/ssh-ls", async (req, res) => {
     // - permissions
     const output = await sshExecForToken(
       token,
-      `ls -F ${JSON.stringify(resolvedDir)}`
+      `ls -aF ${JSON.stringify(resolvedDir)}`
     );
 
     const lines = output.split("\n").filter(Boolean);
