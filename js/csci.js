@@ -346,13 +346,22 @@ function findNodeByPath(node, targetPath) {
 
 // When reloading a folder that was already loaded, preserve the expanded
 // state and loaded children of existing sub-folders.
+// Merges the expansion state from the old tree into the new tree.
+// Ensures that folders stay open during a refresh, but the file list itself is updated.
 function mergeChildren(oldChildren, newChildren) {
   if (!oldChildren) return newChildren;
+  if (!newChildren) return oldChildren;
+
   return newChildren.map(nc => {
     const old = oldChildren.find(oc => oc.name === nc.name && oc.type === nc.type);
-    if (old && old.type === "directory" && old.children) {
-      nc.children = old.children;
+    if (old && old.type === "directory") {
+      // Preserve expanded state
       nc.expanded = old.expanded;
+      // If the old node had children and the new one doesn't (yet), keep them 
+      // so the tree doesn't collapse, but we'll eventually refresh them.
+      if (!nc.children && old.children) {
+        nc.children = old.children;
+      }
     }
     return nc;
   });
@@ -1021,7 +1030,15 @@ document.getElementById("sidebar-refresh")?.addEventListener("click", () => {
         console.error("No SSH token found.");
         return;
     }
+    // Hard refresh: Clear children of the target path in memory to force a re-fetch
     const basePath = window.currentExplorerPath || (window.explorerTree && window.explorerTree.path) || "~";
+    if (basePath === "~" || basePath === "/home") {
+        if (window.explorerTree) window.explorerTree.children = null;
+    } else if (window.explorerTree) {
+        const node = findNodeByPath(window.explorerTree, basePath);
+        if (node) node.children = null;
+    }
+    
     loadFileExplorer(basePath);
 });
 
