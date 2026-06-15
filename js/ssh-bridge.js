@@ -990,6 +990,9 @@ wss.on("connection", (ws, req) => {
       // The client sends JSON { type: "resize", cols, rows } when the
       // golden-layout panel is resized; everything else is raw keystroke data.
       ws.on("message", (data) => {
+        // Active program interaction counts as activity — keep the session
+        // alive so a long-running, interactive program isn't reaped mid-use.
+        touchSession(token);
         const str = data.toString();
         if (str.charAt(0) === "{") {
           try {
@@ -1055,6 +1058,10 @@ wss.on("connection", (ws, req) => {
 
       // Browser keystrokes → shell, with resize support.
       ws.on("message", (data) => {
+        // Every keystroke in the terminal is activity — reset the idle-reap
+        // timer so an actively-used shell is never torn down underneath the
+        // student. This is the main fix for "the terminal times out too fast."
+        touchSession(token);
         const str = data.toString();
         if (str.charAt(0) === "{") {
           try {
