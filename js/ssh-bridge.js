@@ -50,9 +50,12 @@ const sessions = new Map();
 
 // Idle timeout — if a student takes no action for this long, we reap their
 // SSH connection. They'll be forced to sign in again on their next action.
-// 30 minutes is generous for classroom use (lecture pauses, student walks away)
-// but short enough that abandoned tabs don't hold server connections forever.
-const INACTIVITY_MS = 10 * 60 * 1000;
+// 60 minutes is generous for classroom use (lecture pauses, student walks
+// away, reading a long assignment) but short enough that abandoned tabs don't
+// hold server connections forever. NOTE: this timer is reset on *every* bit of
+// activity — sign-in, file ops, compile, run keystrokes, and shell keystrokes
+// (see touchSession calls) — so an actively-used terminal never gets reaped.
+const INACTIVITY_MS = 60 * 60 * 1000;
 
 // Mark a session as recently active and (re)arm its idle-reap timer.
 // Called from sign-in and from every WS handler entry. Safe to call on a
