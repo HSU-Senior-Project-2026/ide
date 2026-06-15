@@ -801,8 +801,26 @@ const DEFAULT_FILES = {
 function getCommandsForFile(langType, sourceFile) {
     const base = sourceFile.replace(/\.[^.]+$/, ""); // strip extension
     switch (langType) {
-        case "java":
-            return { file: sourceFile, compile: `mkdir -p .build && javac -d .build *.java`, run: `java -cp .build ${base}` };
+        case "java": {
+            // Compile every .java in the directory so multi-class projects
+            // (e.g. Main.java + Animal.java) build together.
+            //
+            // For the run target we cannot assume the class with main() is the
+            // file the student happened to have focused when they hit Compile —
+            // doing that breaks the moment a helper class is the active tab
+            // (you'd get "Main method not found in class Animal"). Instead,
+            // detect the class that actually declares `public static void main`
+            // and run that, falling back to the focused file's base name if the
+            // scan finds nothing.
+            const findMain =
+                `MAIN=$(grep -lE 'public[[:space:]]+static[[:space:]]+void[[:space:]]+main' *.java 2>/dev/null | head -n1 | sed 's/\\.java$//'); ` +
+                `exec java -cp .build "\${MAIN:-${base}}"`;
+            return {
+                file: sourceFile,
+                compile: `mkdir -p .build && javac -d .build *.java`,
+                run: `bash -c '${findMain}'`,
+            };
+        }
         case "c":
             return { file: sourceFile, compile: `mkdir -p .build && gcc *.c -o .build/main`, run: ".build/main" };
         case "cpp":
