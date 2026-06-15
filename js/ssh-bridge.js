@@ -795,11 +795,32 @@ const DEFAULT_FILES = {
     py: "main.py", js: "main.js", sh: "main.sh",
 };
 
+// Single-quote a string so it is safe to splice into a POSIX shell command.
+// Any embedded single quote is escaped as '\'' (close-quote, literal quote,
+// reopen-quote). Use this for filenames the student controls.
+function shQuote(s) {
+    return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+// Quote a directory path while still letting the shell expand a leading ~ (or
+// ~/) to the user's home directory. Everything after the ~ is single-quoted so
+// spaces and shell metacharacters in folder names can't break or inject into
+// the command.
+function shQuotePath(p) {
+    const str = String(p);
+    if (str === "~") return "~";
+    if (str.startsWith("~/")) return "~/" + shQuote(str.slice(2));
+    return shQuote(str);
+}
+
 // Build compile and run commands from the actual filename and language type.
 // For Java the filename is critical (must match public class name); for others
 // it only matters that we use a consistent name for write → compile → run.
 function getCommandsForFile(langType, sourceFile) {
     const base = sourceFile.replace(/\.[^.]+$/, ""); // strip extension
+    // Java class names are restricted to identifier characters, so strip
+    // anything else before splicing the fallback into the run command.
+    const safeBase = base.replace(/[^A-Za-z0-9_$]/g, "");
     switch (langType) {
         case "java": {
             // Compile every .java in the directory so multi-class projects
@@ -814,7 +835,7 @@ function getCommandsForFile(langType, sourceFile) {
             // scan finds nothing.
             const findMain =
                 `MAIN=$(grep -lE 'public[[:space:]]+static[[:space:]]+void[[:space:]]+main' *.java 2>/dev/null | head -n1 | sed 's/\\.java$//'); ` +
-                `exec java -cp .build "\${MAIN:-${base}}"`;
+                `exec java -cp .build "\${MAIN:-${safeBase}}"`;
             return {
                 file: sourceFile,
                 compile: `mkdir -p .build && javac -d .build *.java`,
@@ -826,11 +847,11 @@ function getCommandsForFile(langType, sourceFile) {
         case "cpp":
             return { file: sourceFile, compile: `mkdir -p .build && g++ *.cpp -o .build/main`, run: ".build/main" };
         case "py":
-            return { file: sourceFile, compile: null, run: `python3 ${sourceFile}` };
+            return { file: sourceFile, compile: null, run: `python3 ${shQuote(sourceFile)}` };
         case "js":
-            return { file: sourceFile, compile: null, run: `node ${sourceFile}` };
+            return { file: sourceFile, compile: null, run: `node ${shQuote(sourceFile)}` };
         case "sh":
-            return { file: sourceFile, compile: null, run: `bash ${sourceFile}` };
+            return { file: sourceFile, compile: null, run: `bash ${shQuote(sourceFile)}` };
         default:
             return null;
     }
@@ -923,8 +944,8 @@ wss.on("connection", (ws, req) => {
       const workDir = fileDir || session.homeDir || `~`;
       const b64 = Buffer.from(sourceCode).toString("base64");
 
-      const saveStep = `printf '%s' '${b64}' | base64 -d > ${workDir}/${lang.file}`;
-      const compileStep = lang.compile ? ` && cd ${workDir} && ${lang.compile}` : "";
+      const saveStep = `printf '%s' '${b64}' | base64 -d > ${shQuotePath(workDir)}/${shQuote(lang.file)}`;
+      const compileStep = lang.compile ? ` && cd ${shQuotePath(workDir)} && ${lang.compile}` : "";
       const fullCmd = `${saveStep}${compileStep}`;
 
       console.log(`[COMPILE] user=${username} dir=${workDir} file=${lang.file} lang=${langId}`);
@@ -975,7 +996,7 @@ wss.on("connection", (ws, req) => {
     const { username, workDir } = session;
 
     // Run in the user's actual directory so file I/O resolves naturally.
-    const runCmd = `ulimit -t 10 && cd ${workDir} && exec ${session.runCmd}`;
+    const runCmd = `ulimit -t 10 && cd ${shQuotePath(workDir)} && exec ${session.runCmd}`;
 
     console.log(`[RUN] user=${username} dir=${workDir}`);
 
