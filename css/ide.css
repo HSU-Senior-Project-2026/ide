@@ -534,69 +534,27 @@ body.light-theme .lm_title input.tab-rename-input {
   transform: scale(0.95);
 }
 
-/* Fullscreen toggle button — sits to the left of the font-size buttons */
+/* Fullscreen toggle button — sits to the left of the font-size buttons and
+   matches their height. font-btn padding (4px 10px) + 13px line make those
+   buttons ~29px tall; mirror that here and center the icon so the blue block
+   lines up cleanly with A+ / A-. */
 #fullscreen-btn {
   background: #2b5f9e;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   margin-right: 6px;
+  height: 29px;
+  padding: 0 10px;
+  line-height: 1;
 }
 #fullscreen-btn:hover {
   background: #3a6fae;
 }
 #fullscreen-btn i.icon {
   margin: 0;
-}
-
-/* A Golden Layout panel promoted to fill the whole viewport. */
-.panel-fullscreen {
-  position: fixed !important;
-  inset: 0 !important;
-  z-index: 9000 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-  background: #1e1e1e;
-}
-
-/* Floating "exit fullscreen" bar that slides down from the top when the user
-   moves the mouse near the top edge while a panel is fullscreened. */
-#fullscreen-exit-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0 14px;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0));
-  z-index: 9001;
-  transform: translateY(-100%);
-  transition: transform 0.2s ease;
-  pointer-events: none;
-}
-#fullscreen-exit-bar.visible {
-  transform: translateY(0);
-  pointer-events: auto;
-}
-#fullscreen-exit-bar button {
-  border: none;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  font-size: 16px;
+  height: auto;
   line-height: 1;
-  cursor: pointer;
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-#fullscreen-exit-bar button:hover {
-  background: rgba(255, 255, 255, 0.3);
 }
 
 
