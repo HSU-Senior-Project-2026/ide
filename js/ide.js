@@ -1797,6 +1797,92 @@ window.decreaseFont = function () {
     }
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// Panel fullscreen
+// Promotes the Golden Layout panel (stack) the student is currently working
+// in to fill the entire viewport. Exit with Esc or the X that slides down
+// from the top when the mouse approaches the top edge.
+// ─────────────────────────────────────────────────────────────────────────
+(function () {
+    let fullscreenEl = null;        // the .lm_stack currently fullscreened
+    let lastActiveStack = null;     // the stack the student last interacted with
+
+    // Remember which panel the student is working in so the button knows what
+    // to fullscreen. Capture phase so we see the click even if a child stops it.
+    document.addEventListener("mousedown", function (e) {
+        const stack = e.target.closest && e.target.closest(".lm_stack");
+        if (stack) lastActiveStack = stack;
+    }, true);
+
+    // Lazily build the floating exit bar (X button) the first time it's needed.
+    function getExitBar() {
+        let bar = document.getElementById("fullscreen-exit-bar");
+        if (bar) return bar;
+        bar = document.createElement("div");
+        bar.id = "fullscreen-exit-bar";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.title = "Exit fullscreen (Esc)";
+        btn.setAttribute("aria-label", "Exit fullscreen");
+        btn.innerHTML = "&times;";
+        btn.addEventListener("click", exitFullscreen);
+        bar.appendChild(btn);
+        document.body.appendChild(bar);
+        return bar;
+    }
+
+    // Show the exit bar only when the mouse is near the top of the screen.
+    function onMouseMove(e) {
+        const bar = document.getElementById("fullscreen-exit-bar");
+        if (!bar) return;
+        bar.classList.toggle("visible", e.clientY <= 40);
+    }
+
+    function onKeyDown(e) {
+        if (e.key === "Escape") exitFullscreen();
+    }
+
+    // Re-fit editors and terminals after the panel size changes. Monaco uses
+    // automaticLayout, but xterm needs an explicit fit, and Golden Layout needs
+    // to recompute so things line up when we exit.
+    function refit() {
+        try { if (layout) layout.updateSize(); } catch (_) {}
+        window.dispatchEvent(new Event("resize"));
+        setTimeout(function () {
+            try { if (window.outputFitAddon) window.outputFitAddon.fit(); } catch (_) {}
+            try { if (window.shellFitAddon) window.shellFitAddon.fit(); } catch (_) {}
+        }, 60);
+    }
+
+    function exitFullscreen() {
+        if (!fullscreenEl) return;
+        fullscreenEl.classList.remove("panel-fullscreen");
+        fullscreenEl = null;
+        const bar = document.getElementById("fullscreen-exit-bar");
+        if (bar) bar.classList.remove("visible");
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("keydown", onKeyDown);
+        refit();
+    }
+
+    function enterFullscreen() {
+        const target = lastActiveStack ||
+            document.querySelector("#judge0-site-content .lm_stack");
+        if (!target) return;
+        fullscreenEl = target;
+        target.classList.add("panel-fullscreen");
+        getExitBar();
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("keydown", onKeyDown);
+        refit();
+    }
+
+    window.togglePanelFullscreen = function () {
+        if (fullscreenEl) exitFullscreen();
+        else enterFullscreen();
+    };
+})();
+
 window.addEventListener("load", function () {
   const loadingScreen = document.getElementById("loading-screen");
 
