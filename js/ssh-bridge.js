@@ -1095,15 +1095,56 @@ wss.on("connection", (ws, req) => {
       // a genuinely abandoned tab still gets cleaned up normally.
       const shellKeepAlive = setInterval(() => touchSession(token), 60 * 1000);
 
-      // Suppress zsh's PROMPT_EOL_MARK (the '%' character that appears at
-      // the end of every partial line). This is invisible to the user — it
-      // runs before the prompt appears and the command itself is hidden by
-      // the trailing \n which triggers a fresh prompt redraw.
-      stream.write('export PROMPT_EOL_MARK="" 2>/dev/null\n');
+      // Suppress zsh's PROMPT_EOL_MARK (the '%' that appears at the end of
+      // every partial line). We have to send this through the interactive
+      // shell, so the PTY echoes it back as a visible "export ..." line. The
+      // startup filter below hides that echo (and the login MOTD) so the
+      // student only sees the "Last login" line followed by a clean prompt.
+      const SETUP_CMD = 'export PROMPT_EOL_MARK="" 2>/dev/null';
+      stream.write(SETUP_CMD + "\n");
+
+      // Startup filter: buffer the shell's opening output until we've seen the
+      // echo of our setup command, then emit only the "Last login" line plus
+      // whatever follows the echoed command (the fresh prompt) — dropping the
+      // MOTD/banner and the echoed setup command itself. A timeout flushes the
+      // raw buffer if the marker never shows, so the terminal can't hang blank.
+      let startupDone = false;
+      let startupBuf = "";
+
+      const flushStartup = (cleaned) => {
+        if (startupDone) return;
+        startupDone = true;
+        clearTimeout(startupTimer);
+        if (ws.readyState === WebSocket.OPEN && cleaned) ws.send(cleaned);
+      };
+
+      const startupTimer = setTimeout(() => {
+        // Fallback — couldn't find the marker; show whatever we buffered.
+        flushStartup(startupBuf);
+      }, 2500);
 
       // Shell → browser
       stream.on("data", (data) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(data.toString());
+        if (ws.readyState !== WebSocket.OPEN) return;
+
+        if (startupDone) {
+          ws.send(data.toString());
+          return;
+        }
+
+        startupBuf += data.toString();
+        const markerIdx = startupBuf.indexOf(SETUP_CMD);
+        if (markerIdx === -1) return; // keep buffering the banner
+
+        // Need the newline that ends the echoed command line before we know
+        // where the prompt begins.
+        const nlIdx = startupBuf.indexOf("\n", markerIdx);
+        if (nlIdx === -1) return;
+
+        const lastLogin = startupBuf.match(/^.*Last login:.*$/m);
+        const afterPrompt = startupBuf.slice(nlIdx + 1);
+        const cleaned = (lastLogin ? lastLogin[0].replace(/\r?$/, "") + "\r\n" : "") + afterPrompt;
+        flushStartup(cleaned);
       });
 
       // Browser keystrokes → shell, with resize support.
@@ -1128,6 +1169,7 @@ wss.on("connection", (ws, req) => {
       // Shell exited (student typed "exit" or the channel dropped).
       stream.on("close", () => {
         clearInterval(shellKeepAlive);
+        clearTimeout(startupTimer);
         console.log(`[SHELL CLOSED] user=${username}`);
         if (ws.readyState === WebSocket.OPEN) {
           ws.send("\r\n[Shell session ended]\r\n");
@@ -1139,6 +1181,7 @@ wss.on("connection", (ws, req) => {
       // stays alive for future compile/run/shell operations.
       ws.on("close", () => {
         clearInterval(shellKeepAlive);
+        clearTimeout(startupTimer);
         console.log(`[SHELL ABORTED] user=${username}`);
         stream.close();
       });
