@@ -1084,6 +1084,17 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
+      // Keep the session alive for as long as the shell tab is open and
+      // connected, even when the student is reading output without typing.
+      // Keystrokes already touch the session, but a student can sit on a
+      // prompt (or watch a long-running command) for longer than the idle
+      // window without pressing a key — without this heartbeat that idle
+      // reader would be reaped mid-session. The interval is well under
+      // INACTIVITY_MS so the timer never lapses while the WebSocket is open;
+      // it's cleared the moment the shell channel or the WebSocket closes, so
+      // a genuinely abandoned tab still gets cleaned up normally.
+      const shellKeepAlive = setInterval(() => touchSession(token), 60 * 1000);
+
       // Suppress zsh's PROMPT_EOL_MARK (the '%' character that appears at
       // the end of every partial line). This is invisible to the user — it
       // runs before the prompt appears and the command itself is hidden by
@@ -1116,6 +1127,7 @@ wss.on("connection", (ws, req) => {
 
       // Shell exited (student typed "exit" or the channel dropped).
       stream.on("close", () => {
+        clearInterval(shellKeepAlive);
         console.log(`[SHELL CLOSED] user=${username}`);
         if (ws.readyState === WebSocket.OPEN) {
           ws.send("\r\n[Shell session ended]\r\n");
@@ -1126,6 +1138,7 @@ wss.on("connection", (ws, req) => {
       // Browser disconnected — close only this channel. The shared client
       // stays alive for future compile/run/shell operations.
       ws.on("close", () => {
+        clearInterval(shellKeepAlive);
         console.log(`[SHELL ABORTED] user=${username}`);
         stream.close();
       });
